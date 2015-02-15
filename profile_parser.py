@@ -110,44 +110,57 @@ for line in profileTree.nodes[1].info_strings['ExecSummary'].split('\n')[3:]:
     }
     operators[operator['id']] = operator
 
-prev_fragment = None
-curr_fragment = None
-prev_operator = None
-curr_operator = None
+prevFragment = None
+currFragment = None
+prevOperator = None
+currOperator = None
 for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
     match = re.match(
         '^F(?P<id>[0-9]+):PLAN FRAGMENT \[.+\]\s*$',
         line)
     if match:
-        if curr_fragment is not None:
-            db.operators.insert(curr_operator)
-            db.fragments.insert(curr_fragment)
+        if currFragment is not None:
+            db.operators.insert(currOperator)
+            db.fragments.insert(currFragment)
         # start of a new fragment
-        curr_fragment = {
+        currFragment = {
             'id': int(match.group('id')),
             'query_id': queryId,
-            'parent_id': None if prev_fragment is None else prev_fragment['id'],
+            'parent_id': None if prevFragment is None else prevFragment['id'],
         }
-        prev_fragment = curr_fragment
-        prev_operator = None
-        curr_operator = None
+        prevFragment = currFragment
+        prevOperator = None
+        currOperator = None
         continue
 
     match = re.match(
-        '^\s+(?P<indent>\|-+)?(?P<id>[0-9]+):(?P<name>[A-Z\- ]+?)(\s+\[.+\])?\s*$',
+        '^\s+(?P<indent>\|-+)?(?P<id>[0-9]+):(?P<name>[A-Z\- ]+?)(\s+\[(?P<detail>.+)\])?\s*$',
         line)
     if match:
-        if curr_operator is not None:
-            db.operators.insert(curr_operator)
+        if currOperator is not None:
+            db.operators.insert(currOperator)
         # start of a new operator
-        curr_operator = operators[int(match.group('id'))]
-        curr_operator.update({
+        currOperator = operators[int(match.group('id'))]
+        currOperator.update({
             'query_id': queryId,
-            'fragment_id': curr_fragment['id'],
-            'parent_id': None if prev_operator is None else prev_operator['id'],
+            'fragment_id': currFragment['id'],
+            'parent_id': None if prevOperator is None else prevOperator['id'],
         })
+
+        if match.group('name') == 'SCAN HDFS':
+            currOperator.update({
+                'table': re.split(' |,', match.group('detail'))[0],
+            })
+
         if (match.group('indent')) is None:
-            prev_operator = curr_operator
+            prevOperator = currOperator
         continue
-db.operators.insert(curr_operator)
-db.fragments.insert(curr_fragment)
+db.operators.insert(currOperator)
+db.fragments.insert(currFragment)
+
+hdfsScans = db.operators.find({'query_id': queryId, 'name': 'SCAN HDFS'})
+db.queries.update(
+    {'_id': queryId},
+    {'$set': {
+        'num_hdfs_scans': hdfsScans.count(),
+        'num_tables': len(hdfsScans.distinct('table'))}})
