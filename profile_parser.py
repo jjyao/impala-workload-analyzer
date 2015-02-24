@@ -110,7 +110,6 @@ for line in profileTree.nodes[1].info_strings['ExecSummary'].split('\n')[3:]:
     }
     operators[operator['id']] = operator
 
-prevFragment = None
 currFragment = None
 prevOperator = None
 currOperator = None
@@ -126,11 +125,19 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
         currFragment = {
             'id': int(match.group('id')),
             'query_id': queryId,
-            'parent_id': None if prevFragment is None else prevFragment['id'],
+            'exchange_id': None,
         }
-        prevFragment = currFragment
         prevOperator = None
         currOperator = None
+        continue
+
+    match = re.match(
+        '^\s+DATASTREAM SINK \[FRAGMENT=F(?P<fragment_id>[0-9]+), EXCHANGE=(?P<exchange_id>[0-9]+), (?P<detail>.*)\]\s*$',
+        line)
+    if match:
+        currFragment.update({
+            'exchange_id': int(match.group('exchange_id')),
+        })
         continue
 
     match = re.match(
