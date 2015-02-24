@@ -110,7 +110,7 @@ for line in profileTree.nodes[1].info_strings['ExecSummary'].split('\n')[3:]:
     }
     operators[operator['id']] = operator
 
-currFragment = None
+fragments = {}
 prevOperator = None
 currOperator = None
 for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
@@ -118,15 +118,13 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
         '^F(?P<id>[0-9]+):PLAN FRAGMENT \[.+\]\s*$',
         line)
     if match:
-        if currFragment is not None:
-            db.operators.insert(currOperator)
-            db.fragments.insert(currFragment)
         # start of a new fragment
-        currFragment = {
+        fragment = {
             'id': int(match.group('id')),
             'query_id': queryId,
             'exchange_id': None,
         }
+        fragments[fragment['id']] = fragment
         prevOperator = None
         currOperator = None
         continue
@@ -135,7 +133,7 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
         '^\s+DATASTREAM SINK \[FRAGMENT=F(?P<fragment_id>[0-9]+), EXCHANGE=(?P<exchange_id>[0-9]+), (?P<detail>.*)\]\s*$',
         line)
     if match:
-        currFragment.update({
+        fragment.update({
             'exchange_id': int(match.group('exchange_id')),
         })
         continue
@@ -144,13 +142,11 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
         '^\s+(?P<indent>\|-+)?(?P<id>[0-9]+):(?P<name>[A-Z\- ]+?)(\s+\[(?P<detail>.+)\])?\s*$',
         line)
     if match:
-        if currOperator is not None:
-            db.operators.insert(currOperator)
         # start of a new operator
         currOperator = operators[int(match.group('id'))]
         currOperator.update({
             'query_id': queryId,
-            'fragment_id': currFragment['id'],
+            'fragment_id': fragment['id'],
             'parent_id': None if prevOperator is None else prevOperator['id'],
         })
 
@@ -162,8 +158,22 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
         if (match.group('indent')) is None:
             prevOperator = currOperator
         continue
-db.operators.insert(currOperator)
-db.fragments.insert(currFragment)
+
+for profileNode in profileTree.nodes:
+    match = re.match('^HDFS_SCAN_NODE \(id=(?P<id>[0-9]+)\)$', profileNode.name)
+    if match:
+        operator = operators[int(match.group('id'))]
+        if 'File Formats' in profileNode.info_strings:
+            operator.update({
+                'file_formats': profileNode.info_strings['File Formats'],
+            })
+        continue
+
+for operator in operators.itervalues():
+    db.operators.insert(operator)
+
+for fragment in fragments.itervalues():
+    db.fragments.insert(fragment)
 
 hdfsScans = db.operators.find({'query_id': queryId, 'name': 'SCAN HDFS'})
 db.queries.update(
