@@ -98,6 +98,7 @@ for line in profileTree.nodes[1].info_strings['ExecSummary'].split('\n')[3:]:
         line)
     operator = {
         'id': int(match.group('id')),
+        'query_id': queryId,
         'name': match.group('name'),
         'num_hosts': int(match.group('num_hosts')),
         'avg_time': prettyPrintTimeToNanoSeconds(match.group('avg_time')),
@@ -145,7 +146,6 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
         # start of a new operator
         currOperator = operators[int(match.group('id'))]
         currOperator.update({
-            'query_id': queryId,
             'fragment_id': fragment['id'],
             'parent_id': None if prevOperator is None else prevOperator['id'],
         })
@@ -153,6 +153,11 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
         if match.group('name') == 'SCAN HDFS':
             currOperator.update({
                 'table': re.split(' |,', match.group('detail'))[0],
+            })
+        elif match.group('name') == 'HASH JOIN':
+            currOperator.update({
+                'join_type': re.split(', ', match.group('detail'))[0],
+                'join_impl': re.split(', ', match.group('detail'))[1],
             })
 
         if (match.group('indent')) is None:
