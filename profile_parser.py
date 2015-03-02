@@ -164,14 +164,36 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
             prevOperator = currOperator
         continue
 
+averaged_fragment = None
 for profileNode in profileTree.nodes:
-    match = re.match('^HDFS_SCAN_NODE \(id=(?P<id>[0-9]+)\)$', profileNode.name)
+    match = re.match('^Averaged Fragment F(?P<id>[0-9]+)$', profileNode.name)
+    if match:
+        averaged_fragment = True
+        continue
+
+    match = re.match('^Fragment F(?P<id>[0-9]+)$', profileNode.name)
+    if match:
+        averaged_fragment = False
+        continue
+
+    match = re.match('^(?P<name>.+_NODE) \(id=(?P<id>[0-9]+)\)$', profileNode.name)
     if match:
         operator = operators[int(match.group('id'))]
-        if 'File Formats' in profileNode.info_strings:
-            operator.update({
-                'file_formats': profileNode.info_strings['File Formats'],
-            })
+        if averaged_fragment:
+            pass
+        else:
+            if 'info' not in operator:
+                operator['info'] = {}
+            if 'counters' not in operator:
+                operator['counters'] = {}
+            for key, value in profileNode.info_strings.iteritems():
+                if key not in operator['info']:
+                    operator['info'][key] = []
+                operator['info'][key].append(value)
+            for counter in profileNode.counters:
+                if counter.name not in operator['counters']:
+                    operator['counters'][counter.name] = []
+                operator['counters'][counter.name].append(long(counter.value))
         continue
 
 for operator in operators.itervalues():
