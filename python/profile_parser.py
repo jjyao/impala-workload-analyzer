@@ -15,7 +15,7 @@ def prettyPrintSizeToBytes(size):
         "278.73 KB" => 285419
     """
     match = re.match(
-        '^((?P<GB>[0-9.]+) GB)?((?P<MB>[0-9.]+) MB)?((?P<KB>[0-9.]+) KB)?((?P<B>-?[0-9.]+) B)?(0)?$',
+        '^((?P<GB>[0-9.]+) ?GB)?((?P<MB>[0-9.]+) ?MB)?((?P<KB>[0-9.]+) ?KB)?((?P<B>-?[0-9.]+) ?B)?(0)?$',
         size)
     # bytes is a built-in function name
     bytees = 0.0
@@ -114,7 +114,13 @@ for line in profileTree.nodes[1].info_strings['ExecSummary'].split('\n')[3:]:
 fragments = {}
 prevOperator = None
 currOperator = None
-for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
+iterator = iter(profileTree.nodes[1].info_strings['Plan'].split('\n'))
+while True:
+    try:
+        line = iterator.next()
+    except StopIteration:
+        break
+
     match = re.match(
         '^F(?P<id>[0-9]+):PLAN FRAGMENT \[.+\]\s*$',
         line)
@@ -150,9 +156,20 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
             'parent_id': None if prevOperator is None else prevOperator['id'],
         })
 
+        if (match.group('indent')) is None:
+            prevOperator = currOperator
+
         if match.group('name') == 'SCAN HDFS':
             currOperator.update({
                 'table': re.split(' |,', match.group('detail'))[0],
+            })
+
+            line = iterator.next()
+            match = re.match(
+                '^\s+partitions=(?P<partitions>[0-9]+/[0-9]+) files=(?P<files>[0-9]+) size=(?P<size>[0-9.]+[GMKB]+)\s*$',
+                line)
+            currOperator.update({
+                'size': prettyPrintSizeToBytes(match.group('size')),
             })
         elif match.group('name') == 'HASH JOIN':
             currOperator.update({
@@ -160,8 +177,6 @@ for line in profileTree.nodes[1].info_strings['Plan'].split('\n'):
                 'join_impl': re.split(', ', match.group('detail'))[1],
             })
 
-        if (match.group('indent')) is None:
-            prevOperator = currOperator
         continue
 
 averaged_fragment = None

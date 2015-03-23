@@ -16,6 +16,7 @@ public class QueryParser {
 
         SelectList selectList = stmt.getSelectList();
         parsedQuery.put("num_output_columns", selectList.getItems().size());
+
         for (SelectListItem item : selectList.getItems()) {
             String tableName = null;
             if (item.getTblName() != null) {
@@ -60,12 +61,24 @@ public class QueryParser {
             tableToColumnsMap.get(tableName).add(columnName);
         }
 
+        int num_from_subqueries = 0;
+        for (TableRef tableRef : stmt.getTableRefs()) {
+            if (tableRef instanceof InlineViewRef) {
+                num_from_subqueries++;
+            }
+        }
+        parsedQuery.put("num_from_subqueries", num_from_subqueries);
+
         if (stmt.hasGroupByClause()) {
             parsedQuery.put("num_group_by_columns", stmt.groupingExprs_.size());
         }
 
         if (stmt.hasOrderByClause()) {
             parsedQuery.put("num_order_by_columns", stmt.orderByElements_.size());
+        }
+
+        if (stmt.hasLimit()) {
+            parsedQuery.put("limit", ((NumericLiteral) stmt.limitElement_.getLimitExpr()).getIntValue());
         }
 
         return parsedQuery;
