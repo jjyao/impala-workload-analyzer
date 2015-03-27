@@ -3,6 +3,7 @@ sys.path.append('gen-py')
 
 import re
 import zlib
+import struct
 import base64
 import pymongo
 from RuntimeProfile.ttypes import *
@@ -71,6 +72,22 @@ def prettyPrintTimeToNanoSeconds(time):
     if match.group('ns') is not None:
         nanoseconds = nanoseconds + float(match.group('ns'))
     return long(nanoseconds)
+
+def getCounterValue(counter):
+    # https://github.com/cloudera/Impala/blob/cdh5-trunk/be/src/util/pretty-printer.h
+    # reinterpret long as double
+    if counter.type == TCounterType.DOUBLE_VALUE:
+        return struct.unpack('d', struct.pack('q', counter.value))[0]
+    else:
+        return long(counter.value)
+
+def checkOperatorConsistency(operator):
+    if 'avg_counters' not in operator:
+        return
+
+    for key, value in operator['avg_counters'].iteritems():
+        if value != (sum(operator['counters'][key]) / len(operator['counters'][key])):
+            print '%s %s %s %s %s' % (operator['name'], operator['id'], key, value, operator['counters'][key])
 
 with open(sys.argv[1], 'r') as profileFile:
     profileData = zlib.decompress(base64.b64decode(profileFile.read()))
@@ -179,23 +196,34 @@ while True:
 
         continue
 
-averaged_fragment = None
+isCoordinatorFragment = None
+isAveragedFragment = None
 for profileNode in profileTree.nodes:
+    match = re.match('^Coordinator Fragment F(?P<id>[0-9]+)$', profileNode.name)
+    if match:
+        isCoordinatorFragment = True
+        isAveragedFragment = False
+        continue
+
     match = re.match('^Averaged Fragment F(?P<id>[0-9]+)$', profileNode.name)
     if match:
-        averaged_fragment = True
+        isCoordinatorFragment = False
+        isAveragedFragment = True
         continue
 
     match = re.match('^Fragment F(?P<id>[0-9]+)$', profileNode.name)
     if match:
-        averaged_fragment = False
+        isCoordinatorFragment = False
+        isAveragedFragment = False
         continue
 
     match = re.match('^(?P<name>.+_NODE) \(id=(?P<id>[0-9]+)\)$', profileNode.name)
     if match:
         operator = operators[int(match.group('id'))]
-        if averaged_fragment:
-            pass
+        if isAveragedFragment:
+            operator['avg_counters'] = {}
+            for counter in profileNode.counters:
+                operator['avg_counters'][counter.name] = getCounterValue(counter)
         else:
             if 'info' not in operator:
                 operator['info'] = {}
@@ -208,8 +236,11 @@ for profileNode in profileTree.nodes:
             for counter in profileNode.counters:
                 if counter.name not in operator['counters']:
                     operator['counters'][counter.name] = []
-                operator['counters'][counter.name].append(long(counter.value))
+                operator['counters'][counter.name].append(getCounterValue(counter))
         continue
+
+for operator in operators.itervalues():
+    checkOperatorConsistency(operator)
 
 for operator in operators.itervalues():
     db.operators.insert(operator)
