@@ -196,6 +196,15 @@ while True:
 
         continue
 
+    match = re.match(
+        '^\s+\|?\s+tuple-ids=(?P<tuple_ids>[0-9,]+) row-size=(?P<row_size>[0-9.]+[GMKB]+) cardinality=(?P<cardinality>[0-9]+)\s*$',
+        line)
+    if match:
+        currOperator.update({
+            'cardinality': long(match.group('cardinality')),
+        })
+        continue
+
 isCoordinatorFragment = None
 isAveragedFragment = None
 for profileNode in profileTree.nodes:
