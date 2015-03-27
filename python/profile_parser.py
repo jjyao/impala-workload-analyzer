@@ -89,6 +89,21 @@ def checkOperatorConsistency(operator):
         if value != (sum(operator['counters'][key]) / len(operator['counters'][key])):
             print '%s %s %s %s %s' % (operator['name'], operator['id'], key, value, operator['counters'][key])
 
+def checkJoinOperator(operator):
+    global operators
+
+    if operator['name'] != 'HASH JOIN':
+        return
+
+    left_child = operators[operator['left_child_id']]
+    right_child = operators[operator['right_child_id']]
+
+    if operator['join_impl'] == 'BROADCAST':
+        # http://www.cloudera.com/content/cloudera/en/documentation/cloudera-impala/latest/topics/impala_perf_joins.html
+        assert left_child['cardinality'] >= right_child['cardinality']
+        if left_child['num_rows'] < right_child['num_rows']:
+            print 'BAD BROADCAST JOIN %s' % operator['id']
+
 with open(sys.argv[1], 'r') as profileFile:
     profileData = zlib.decompress(base64.b64decode(profileFile.read()))
 
@@ -173,26 +188,24 @@ while True:
             'parent_id': None if prevOperator is None else prevOperator['id'],
         })
 
-        if (match.group('indent')) is None:
-            prevOperator = currOperator
+        if prevOperator is not None and prevOperator['name'] == 'HASH JOIN':
+            if match.group('indent') is None:
+                prevOperator['left_child_id'] = currOperator['id']
+            else:
+                prevOperator['right_child_id'] = currOperator['id']
 
         if match.group('name') == 'SCAN HDFS':
             currOperator.update({
                 'table': re.split(' |,', match.group('detail'))[0],
-            })
-
-            line = iterator.next()
-            match = re.match(
-                '^\s+partitions=(?P<partitions>[0-9]+/[0-9]+) files=(?P<files>[0-9]+) size=(?P<size>[0-9.]+[GMKB]+)\s*$',
-                line)
-            currOperator.update({
-                'size': prettyPrintSizeToBytes(match.group('size')),
             })
         elif match.group('name') == 'HASH JOIN':
             currOperator.update({
                 'join_type': re.split(', ', match.group('detail'))[0],
                 'join_impl': re.split(', ', match.group('detail'))[1],
             })
+
+        if match.group('indent') is None:
+            prevOperator = currOperator
 
         continue
 
@@ -202,6 +215,15 @@ while True:
     if match:
         currOperator.update({
             'cardinality': long(match.group('cardinality')),
+        })
+        continue
+
+    match = re.match(
+        '^\s+partitions=(?P<partitions>[0-9]+/[0-9]+) files=(?P<files>[0-9]+) size=(?P<size>[0-9.]+[GMKB]+)\s*$',
+        line)
+    if match:
+        currOperator.update({
+            'size': prettyPrintSizeToBytes(match.group('size')),
         })
         continue
 
@@ -250,6 +272,7 @@ for profileNode in profileTree.nodes:
 
 for operator in operators.itervalues():
     checkOperatorConsistency(operator)
+    checkJoinOperator(operator)
 
 for operator in operators.itervalues():
     db.operators.insert(operator)
