@@ -284,6 +284,7 @@ hdfsScans = db.operators.find({'query_id': queryId, 'name': 'SCAN HDFS'})
 query = {
     'sql': profileTree.nodes[1].info_strings['Sql Statement'],
     'runtime': profileTree.nodes[1].event_sequences[0].timestamps[-1],
+    'num_hosts': max([operator['num_hosts'] for operator in operators.itervalues()]),
     'num_hdfs_scans': hdfsScans.count(),
     'num_tables': len(hdfsScans.distinct('table'))
 }
