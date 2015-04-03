@@ -121,7 +121,7 @@ db.operators.ensure_index(
         [('query_id', pymongo.ASCENDING), ('id', pymongo.ASCENDING)],
         unique=True)
 
-queryId = db.queries.insert({'sql': profileTree.nodes[1].info_strings['Sql Statement']})
+queryId = db.queries.insert({})
 
 operators = {}
 for line in profileTree.nodes[1].info_strings['ExecSummary'].split('\n')[3:]:
@@ -281,8 +281,14 @@ for fragment in fragments.itervalues():
     db.fragments.insert(fragment)
 
 hdfsScans = db.operators.find({'query_id': queryId, 'name': 'SCAN HDFS'})
+query = {
+    'sql': profileTree.nodes[1].info_strings['Sql Statement'],
+    'runtime': profileTree.nodes[1].event_sequences[0].timestamps[-1],
+    'num_hdfs_scans': hdfsScans.count(),
+    'num_tables': len(hdfsScans.distinct('table'))
+}
+
 db.queries.update(
     {'_id': queryId},
-    {'$set': {
-        'num_hdfs_scans': hdfsScans.count(),
-        'num_tables': len(hdfsScans.distinct('table'))}})
+    {'$set': query}
+)
