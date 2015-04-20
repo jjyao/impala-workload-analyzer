@@ -21,6 +21,17 @@ def hist(data, minval, maxval, xlabel, ylabel, title, output):
     pyplot.tight_layout()
     pyplot.savefig(output)
 
+def bar(data, minval, maxval, xlabel, ylabel, title, output):
+    pyplot.clf()
+    height = [0] * (maxval + 1 - minval)
+    for i in data:
+        height[i - minval] += 1
+    pyplot.bar(numpy.arange(minval, maxval + 1), height, align = 'center')
+    pyplot.xlabel(xlabel)
+    pyplot.ylabel(ylabel)
+    pyplot.title(title)
+    pyplot.tight_layout()
+    pyplot.savefig(output)
 
 db = pymongo.MongoClient().impala
 
@@ -97,7 +108,12 @@ hist(num_joins, min_num_joins, max_num_joins,
         "Number of Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_joins, max_num_joins, avg_num_joins),
-        "num_joins.png")
+        "num_joins_hist.png")
+bar(num_joins, min_num_joins, max_num_joins,
+        "Number of Joins", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_joins, max_num_joins, avg_num_joins),
+        "num_joins_bar.png")
 
 min_num_broadcast_joins = min(num_broadcast_joins)
 max_num_broadcast_joins = max(num_broadcast_joins)
@@ -106,7 +122,12 @@ hist(num_broadcast_joins, min_num_broadcast_joins, max_num_broadcast_joins,
         "Number of Broadcast Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_broadcast_joins, max_num_broadcast_joins, avg_num_broadcast_joins),
-        "num_broadcast_joins.png")
+        "num_broadcast_joins_hist.png")
+bar(num_broadcast_joins, min_num_broadcast_joins, max_num_broadcast_joins,
+        "Number of Broadcast Joins", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_broadcast_joins, max_num_broadcast_joins, avg_num_broadcast_joins),
+        "num_broadcast_joins_bar.png")
 
 min_num_partitioned_joins = min(num_partitioned_joins)
 max_num_partitioned_joins = max(num_partitioned_joins)
@@ -115,7 +136,12 @@ hist(num_partitioned_joins, min_num_partitioned_joins, max_num_partitioned_joins
         "Number of Partitioned Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_partitioned_joins, max_num_partitioned_joins, avg_num_partitioned_joins),
-        "num_partitioned_joins.png")
+        "num_partitioned_joins_hist.png")
+bar(num_partitioned_joins, min_num_partitioned_joins, max_num_partitioned_joins,
+        "Number of Partitioned Joins", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_partitioned_joins, max_num_partitioned_joins, avg_num_partitioned_joins),
+        "num_partitioned_joins_bar.png")
 
 min_num_inner_joins = min(num_inner_joins)
 max_num_inner_joins = max(num_inner_joins)
@@ -124,7 +150,12 @@ hist(num_inner_joins, min_num_inner_joins, max_num_inner_joins,
         "Number of Inner Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_inner_joins, max_num_inner_joins, avg_num_inner_joins),
-        "num_inner_joins.png")
+        "num_inner_joins_hist.png")
+bar(num_inner_joins, min_num_inner_joins, max_num_inner_joins,
+        "Number of Inner Joins", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_inner_joins, max_num_inner_joins, avg_num_inner_joins),
+        "num_inner_joins_bar.png")
 
 min_num_tables = min(num_tables)
 max_num_tables = max(num_tables)
@@ -133,7 +164,12 @@ hist(num_tables, min_num_tables, max_num_tables,
         "Number of Tables", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_tables, max_num_tables, avg_num_tables),
-        "num_tables.png")
+        "num_tables_hist.png")
+bar(num_tables, min_num_tables, max_num_tables,
+        "Number of Tables", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_tables, max_num_tables, avg_num_tables),
+        "num_tables_bar.png")
 
 min_num_hdfs_scans = min(num_hdfs_scans)
 max_num_hdfs_scans = max(num_hdfs_scans)
@@ -142,7 +178,12 @@ hist(num_hdfs_scans, min_num_hdfs_scans, max_num_hdfs_scans,
         "Number of HDFS Scans", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_hdfs_scans, max_num_hdfs_scans, avg_num_hdfs_scans),
-        "num_hdfs_scans.png")
+        "num_hdfs_scans_hist.png")
+bar(num_hdfs_scans, min_num_hdfs_scans, max_num_hdfs_scans,
+        "Number of HDFS Scans", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_hdfs_scans, max_num_hdfs_scans, avg_num_hdfs_scans),
+        "num_hdfs_scans_bar.png")
 
 min_num_output_columns = min(num_output_columns)
 max_num_output_columns = max(num_output_columns)
@@ -151,7 +192,12 @@ hist(num_output_columns, min_num_output_columns, max_num_output_columns,
         "Number of Output Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_output_columns, max_num_output_columns, avg_num_output_columns),
-        "num_output_columns.png")
+        "num_output_columns_hist.png")
+bar(num_output_columns, min_num_output_columns, max_num_output_columns,
+        "Number of Output Columns", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_output_columns, max_num_output_columns, avg_num_output_columns),
+        "num_output_columns_bar.png")
 
 min_num_group_by_columns = min(num_group_by_columns)
 max_num_group_by_columns = max(num_group_by_columns)
@@ -160,7 +206,12 @@ hist(num_group_by_columns, min_num_group_by_columns, max_num_group_by_columns,
         "Number of Group By Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_group_by_columns, max_num_group_by_columns, avg_num_group_by_columns),
-        "num_group_by_columns.png")
+        "num_group_by_columns_hist.png")
+bar(num_group_by_columns, min_num_group_by_columns, max_num_group_by_columns,
+        "Number of Group By Columns", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_group_by_columns, max_num_group_by_columns, avg_num_group_by_columns),
+        "num_group_by_columns_bar.png")
 
 min_num_order_by_columns = min(num_order_by_columns)
 max_num_order_by_columns = max(num_order_by_columns)
@@ -169,7 +220,12 @@ hist(num_order_by_columns, min_num_order_by_columns, max_num_order_by_columns,
         "Number of Order By Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_order_by_columns, max_num_order_by_columns, avg_num_order_by_columns),
-        "num_order_by_columns.png")
+        "num_order_by_columns_hist.png")
+bar(num_order_by_columns, min_num_order_by_columns, max_num_order_by_columns,
+        "Number of Order By Columns", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_order_by_columns, max_num_order_by_columns, avg_num_order_by_columns),
+        "num_order_by_columns_bar.png")
 
 min_hdfs_scan_size = min(hdfs_scan_size)
 max_hdfs_scan_size = max(hdfs_scan_size)
@@ -187,7 +243,12 @@ hist(num_from_subqueries, min_num_from_subqueries, max_num_from_subqueries,
         "Number of From Subqueries", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_from_subqueries, max_num_from_subqueries, avg_num_from_subqueries),
-        "num_from_subqueries.png")
+        "num_from_subqueries_hist.png")
+bar(num_from_subqueries, min_num_from_subqueries, max_num_from_subqueries,
+        "Number of From Subqueries", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (min_num_from_subqueries, max_num_from_subqueries, avg_num_from_subqueries),
+        "num_from_subqueries_bar.png")
 
 min_runtime = min(runtime)
 max_runtime = max(runtime)
