@@ -3,9 +3,12 @@ sys.path.append('gen-py')
 
 import re
 import zlib
+import time
 import struct
 import base64
+import hashlib
 import pymongo
+import datetime
 from RuntimeProfile.ttypes import *
 from thrift.protocol import TCompactProtocol
 
@@ -280,14 +283,26 @@ for operator in operators.itervalues():
 for fragment in fragments.itervalues():
     db.fragments.insert(fragment)
 
+hosts = re.findall('(?P<host>[^() ]+:[0-9]+)', \
+        profileTree.nodes[3].info_strings['Per Node Peak Memory Usage'])
+hosts.sort()
+
 hdfsScans = db.operators.find({'query_id': queryId, 'name': 'SCAN HDFS'})
 query = {
     'sql': profileTree.nodes[1].info_strings['Sql Statement'],
-    'runtime': profileTree.nodes[1].event_sequences[0].timestamps[-1],
+    'runtime': profileTree.nodes[1].event_sequences[0].timestamps[-1], # nanoseconds
+    'start_time': long(time.mktime(datetime.datetime.strptime(profileTree.nodes[1].info_strings['Start Time'], \
+                                '%Y-%m-%d %H:%M:%S.%f000').timetuple())),
+    'end_time': long(time.mktime(datetime.datetime.strptime(profileTree.nodes[1].info_strings['End Time'], \
+                                '%Y-%m-%d %H:%M:%S.%f000').timetuple())),
+    'hosts': hosts,
+    'cluster': hashlib.md5(' '.join(hosts)).hexdigest(),
     'num_hosts': max([operator['num_hosts'] for operator in operators.itervalues()]),
     'num_hdfs_scans': hdfsScans.count(),
     'num_tables': len(hdfsScans.distinct('table'))
 }
+
+assert len(query['hosts']) == query['num_hosts']
 
 db.queries.update(
     {'_id': queryId},
