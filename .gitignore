@@ -2,3 +2,4 @@
 gen-py/
 mongodb/
 out/
+*.pyc
