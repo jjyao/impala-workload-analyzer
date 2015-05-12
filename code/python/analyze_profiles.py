@@ -7,11 +7,11 @@ from RuntimeProfile.ttypes import *
 from profile_analyzer import ProfileAnalyzer
 from thrift.protocol import TCompactProtocol
 
-print sys.argv[1]
+print sys.argv[2]
 
-tag = sys.argv[2]
+tag = sys.argv[1]
 analyzer = ProfileAnalyzer()
-with open(sys.argv[1], 'r') as profileFile:
+with open(sys.argv[2], 'r') as profileFile:
     for line in profileFile:
         profile = line.split(" ")[2]
         profileData = zlib.decompress(base64.b64decode(profile))

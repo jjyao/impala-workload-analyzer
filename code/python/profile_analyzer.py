@@ -21,6 +21,10 @@ class ProfileAnalyzer:
                 unique=True)
 
     def analyze(self, profileTree, tag):
+        if 'ExecSummary' not in profileTree.nodes[1].info_strings:
+            # skip queries like 'GET_SCHEMAS'
+            return
+
         operators = {}
         fragments = {}
         queryId = self.db.queries.insert({})
@@ -200,7 +204,7 @@ class ProfileAnalyzer:
             'num_tables': len(hdfsScans.distinct('table'))
         }
 
-        assert len(query['hosts']) == query['num_hosts']
+        assert len(query['hosts']) >= query['num_hosts']
 
         self.db.queries.update(
             {'_id': queryId},

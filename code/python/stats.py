@@ -26,9 +26,11 @@ def bar(data, minval, maxval, xlabel, ylabel, title, output):
     height = [0] * (maxval + 1 - minval)
     for i in data:
         height[i - minval] += 1
-    pyplot.bar(numpy.arange(minval, maxval + 1), height, align = 'center')
+    left = numpy.arange(minval, maxval + 1)
+    pyplot.bar(left, height, align = 'center')
     pyplot.xlabel(xlabel)
     pyplot.ylabel(ylabel)
+    pyplot.xticks(left)
     pyplot.title(title)
     pyplot.tight_layout()
     pyplot.savefig('%s/%s' % (outputDir, output))
