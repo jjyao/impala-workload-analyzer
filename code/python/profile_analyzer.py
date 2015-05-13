@@ -50,6 +50,7 @@ class ProfileAnalyzer:
 
         prevOperator = None
         currOperator = None
+        parentOperators = {0: None}
         iterator = iter(profileTree.nodes[1].info_strings['Plan'].split('\n'))
         while True:
             try:
@@ -70,6 +71,7 @@ class ProfileAnalyzer:
                 fragments[fragment['id']] = fragment
                 prevOperator = None
                 currOperator = None
+                parentOperators = {0: None}
                 continue
 
             match = re.match(
@@ -82,21 +84,28 @@ class ProfileAnalyzer:
                 continue
 
             match = re.match(
-                '^\s+(?P<indent>\|-+)?(?P<id>[0-9]+):(?P<name>[A-Z\- ]+?)(\s+\[(?P<detail>.+)\])?\s*$',
+                '^\s+(?P<indent>[|\- ]+)?(?P<id>[0-9]+):(?P<name>[A-Z\- ]+?)(\s+\[(?P<detail>.+)\])?\s*$',
                 line)
             if match:
                 # start of a new operator
                 currOperator = operators[int(match.group('id'))]
+                if match.group('indent') is None:
+                    parentOperator = parentOperators[0]
+                elif match.group('indent').endswith('--'):
+                    parentOperator = prevOperator
+                else:
+                    parentOperator = parentOperators[len(match.group('indent'))]
                 currOperator.update({
                     'fragment_id': fragment['id'],
-                    'parent_id': None if prevOperator is None else prevOperator['id'],
+                    'parent_id': None if parentOperator is None else parentOperator['id'],
                 })
 
-                if prevOperator is not None and prevOperator['name'] == 'HASH JOIN':
-                    if match.group('indent') is None:
-                        prevOperator['left_child_id'] = currOperator['id']
+                if parentOperator is not None and parentOperator['name'] in ('HASH JOIN', 'CROSS JOIN', 'UNION'):
+                    # right child first
+                    if 'right_child_id' not in parentOperator:
+                        parentOperator['right_child_id'] = currOperator['id']
                     else:
-                        prevOperator['right_child_id'] = currOperator['id']
+                        parentOperator['left_child_id'] = currOperator['id']
 
                 if match.group('name') == 'SCAN HDFS':
                     currOperator.update({
@@ -107,18 +116,26 @@ class ProfileAnalyzer:
                         'join_type': re.split(', ', match.group('detail'))[0],
                         'join_impl': re.split(', ', match.group('detail'))[1],
                     })
+                elif match.group('name') == 'CROSS JOIN':
+                    currOperator.update({
+                        'join_impl': match.group('detail'),
+                    })
 
+                prevOperator = currOperator
                 if match.group('indent') is None:
-                    prevOperator = currOperator
+                    parentOperators[0] = currOperator
+                else:
+                    parentOperators[len(match.group('indent'))] = currOperator
 
                 continue
 
             match = re.match(
-                '^\s+\|?\s+tuple-ids=(?P<tuple_ids>[0-9,]+) row-size=(?P<row_size>[0-9.]+[GMKB]+) cardinality=(?P<cardinality>[0-9]+)\s*$',
+                '^\s+\|?\s+tuple-ids=(?P<tuple_ids>[0-9,]+) row-size=(?P<row_size>[0-9.]+[GMKB]+) cardinality=(?P<cardinality>[0-9]+|unavailable)\s*$',
                 line)
             if match:
+                cardinality = match.group('cardinality')
                 currOperator.update({
-                    'cardinality': long(match.group('cardinality')),
+                    'cardinality': -1L if cardinality == 'unavailable' else long(cardinality),
                 })
                 continue
 
