@@ -150,23 +150,42 @@ class ProfileAnalyzer:
 
         isCoordinatorFragment = None
         isAveragedFragment = None
+        currFragment = None
         for profileNode in profileTree.nodes:
             match = re.match('^Coordinator Fragment F(?P<id>[0-9]+)$', profileNode.name)
             if match:
                 isCoordinatorFragment = True
                 isAveragedFragment = False
+                currFragment = fragments[int(match.group('id'))]
                 continue
 
             match = re.match('^Averaged Fragment F(?P<id>[0-9]+)$', profileNode.name)
             if match:
                 isCoordinatorFragment = False
                 isAveragedFragment = True
+                currFragment = fragments[int(match.group('id'))]
                 continue
 
             match = re.match('^Fragment F(?P<id>[0-9]+)$', profileNode.name)
             if match:
                 isCoordinatorFragment = False
                 isAveragedFragment = False
+                currFragment = fragments[int(match.group('id'))]
+                continue
+
+            match = re.match('^CodeGen$', profileNode.name)
+            if match:
+                if isAveragedFragment:
+                    currFragment['avg_code_gen'] = {}
+                    for counter in profileNode.counters:
+                        currFragment['avg_code_gen'][counter.name] = self.getCounterValue(counter)
+                else:
+                    if 'code_gen' not in currFragment:
+                        currFragment['code_gen'] = {}
+                    for counter in profileNode.counters:
+                        if counter.name not in currFragment['code_gen']:
+                            currFragment['code_gen'][counter.name] = []
+                        currFragment['code_gen'][counter.name].append(self.getCounterValue(counter))
                 continue
 
             match = re.match('^(?P<name>.+_NODE) \(id=(?P<id>[0-9]+)\)$', profileNode.name)
@@ -195,6 +214,9 @@ class ProfileAnalyzer:
             self.checkOperatorConsistency(operator)
             self.checkJoinOperator(operator, operators)
 
+        for fragment in fragments.itervalues():
+            self.checkFragmentConsistency(fragment)
+
         for operator in operators.itervalues():
             self.db.operators.insert(operator)
 
@@ -210,6 +232,11 @@ class ProfileAnalyzer:
             'tag': tag,
             'sql': profileTree.nodes[1].info_strings['Sql Statement'],
             'runtime': profileTree.nodes[1].event_sequences[0].timestamps[-1], # nanoseconds
+            # Start execution + Planning finished
+            'plan_time': profileTree.nodes[1].event_sequences[0].timestamps[1],
+            # Ready to start remote fragments + Remote fragments started
+            'fragment_start_time': profileTree.nodes[1].event_sequences[0].timestamps[3] - \
+                    profileTree.nodes[1].event_sequences[0].timestamps[1],
             'start_time': self.datetimeToMicroseconds(datetime.datetime.strptime(profileTree.nodes[1].info_strings['Start Time'], \
                                         '%Y-%m-%d %H:%M:%S.%f000')),
             'end_time': self.datetimeToMicroseconds(datetime.datetime.strptime(profileTree.nodes[1].info_strings['End Time'], \
@@ -310,6 +337,14 @@ class ProfileAnalyzer:
         for key, value in operator['avg_counters'].iteritems():
             if value != (sum(operator['counters'][key]) / len(operator['counters'][key])):
                 print '%s %s %s %s %s' % (operator['name'], operator['id'], key, value, operator['counters'][key])
+
+    def checkFragmentConsistency(self, fragment):
+        if 'avg_code_gen' not in fragment:
+            return
+
+        for key, value in fragment['avg_code_gen'].iteritems():
+            if value != (sum(fragment['code_gen'][key]) / len(fragment['code_gen'][key])):
+                print '%s %s %s %s' % (fragment['id'], key, value, fragment['code_gen'][key])
 
     def checkJoinOperator(self, operator, operators):
         if operator['name'] != 'HASH JOIN':

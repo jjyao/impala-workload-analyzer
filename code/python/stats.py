@@ -77,9 +77,27 @@ for query in queries:
         {'$match': {'query_id': query['_id']}},
         {'$group': {'_id': '$name', 'avg_time': {'$sum': '$avg_time'}}},
     ])['result']
-    sum_time = float(sum(operator['avg_time'] for operator in operators))
+    code_gen_time = db.fragments.aggregate([
+        {'$match': {'query_id': query['_id']}},
+        {'$group': {'_id': None, 'total_time': {'$sum': '$avg_code_gen.TotalTime'}}},
+    ])['result'][0]['total_time']
+    sum_time = float(sum(operator['avg_time'] for operator in operators)) + \
+            query['plan_time'] + query['fragment_start_time'] + code_gen_time
     for operator in operators:
         operator['time_pct'] = operator['avg_time'] / sum_time
+    # add three special operators
+    operators.append({
+        '_id': 'Plan',
+        'time_pct': query['plan_time'] / sum_time,
+    })
+    operators.append({
+        '_id': 'Fragment Start',
+        'time_pct': query['fragment_start_time'] / sum_time,
+    })
+    operators.append({
+        '_id': 'CodeGen',
+        'time_pct': code_gen_time / sum_time,
+    })
     for operator in operators:
         if operator['_id'] not in sum_time_pct:
             sum_time_pct[operator['_id']] = operator['time_pct']
