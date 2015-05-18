@@ -280,7 +280,7 @@ min_runtime = min(runtime)
 max_runtime = max(runtime)
 avg_runtime = sum(runtime) / float(num_queries)
 hist(runtime, min_runtime, max_runtime,
-        "Runtime", "Number of Queries",
+        "Runtime (s)", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_runtime, max_runtime, avg_runtime),
         "runtime.png")
@@ -300,15 +300,15 @@ for cluster in clusters:
     times.sort()
     max_num_concurrent_queries = 1
     cur_num_concurrent_queries = 1
-    sum_num_query_seconds = 0
+    sum_num_query_microseconds = 0
     sum_num_concurrent_queries = 0
     for i in xrange(1, len(times)):
         interval = times[i][0] - times[i-1][0]
         if cur_num_concurrent_queries > 0:
-            sum_num_query_seconds += interval
+            sum_num_query_microseconds += interval
             sum_num_concurrent_queries += interval * cur_num_concurrent_queries
         cur_num_concurrent_queries += times[i][1]
         max_num_concurrent_queries = max(max_num_concurrent_queries, cur_num_concurrent_queries)
-    avg_num_concurrent_queries = float(sum_num_concurrent_queries) / sum_num_query_seconds
+    avg_num_concurrent_queries = float(sum_num_concurrent_queries) / sum_num_query_microseconds
     print max_num_concurrent_queries
     print avg_num_concurrent_queries

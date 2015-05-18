@@ -38,8 +38,8 @@ class ProfileAnalyzer:
                 'query_id': queryId,
                 'name': match.group('name'),
                 'num_hosts': int(match.group('num_hosts')),
-                'avg_time': self.prettyPrintTimeToNanoSeconds(match.group('avg_time')),
-                'max_time': self.prettyPrintTimeToNanoSeconds(match.group('max_time')),
+                'avg_time': self.prettyPrintTimeToNanoseconds(match.group('avg_time')),
+                'max_time': self.prettyPrintTimeToNanoseconds(match.group('max_time')),
                 'num_rows': self.prettyPrintNumberToUnits(match.group('num_rows')),
                 'est_num_rows': self.prettyPrintNumberToUnits(match.group('est_num_rows')),
                 'peak_mem': self.prettyPrintSizeToBytes(match.group('peak_mem')),
@@ -210,10 +210,10 @@ class ProfileAnalyzer:
             'tag': tag,
             'sql': profileTree.nodes[1].info_strings['Sql Statement'],
             'runtime': profileTree.nodes[1].event_sequences[0].timestamps[-1], # nanoseconds
-            'start_time': long(time.mktime(datetime.datetime.strptime(profileTree.nodes[1].info_strings['Start Time'], \
-                                        '%Y-%m-%d %H:%M:%S.%f000').timetuple())),
-            'end_time': long(time.mktime(datetime.datetime.strptime(profileTree.nodes[1].info_strings['End Time'], \
-                                        '%Y-%m-%d %H:%M:%S.%f000').timetuple())),
+            'start_time': self.datetimeToMicroseconds(datetime.datetime.strptime(profileTree.nodes[1].info_strings['Start Time'], \
+                                        '%Y-%m-%d %H:%M:%S.%f000')),
+            'end_time': self.datetimeToMicroseconds(datetime.datetime.strptime(profileTree.nodes[1].info_strings['End Time'], \
+                                        '%Y-%m-%d %H:%M:%S.%f000')),
             'hosts': hosts,
             'cluster': hashlib.md5(' '.join(hosts)).hexdigest(),
             'num_hosts': max([operator['num_hosts'] for operator in operators.itervalues()]),
@@ -227,6 +227,9 @@ class ProfileAnalyzer:
             {'_id': queryId},
             {'$set': query}
         )
+
+    def datetimeToMicroseconds(self, datetime):
+        return long(time.mktime(datetime.timetuple()) * 1e6) + datetime.microsecond
 
     def prettyPrintSizeToBytes(self, size):
         """ https://github.com/cloudera/Impala/blob/cdh5-trunk/be/src/util/pretty-printer.h
@@ -269,7 +272,7 @@ class ProfileAnalyzer:
             units = units + float(match.group('S'))
         return long(units)
 
-    def prettyPrintTimeToNanoSeconds(self, time):
+    def prettyPrintTimeToNanoseconds(self, time):
         """ https://github.com/cloudera/Impala/blob/cdh5-trunk/be/src/util/pretty-printer.h
             convert a pretty printed time to nanoseconds
             "795.202us" => 795202L
