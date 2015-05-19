@@ -25,6 +25,10 @@ class ProfileAnalyzer:
             # skip queries like 'GET_SCHEMAS'
             return
 
+        if profileTree.nodes[1].info_strings['Query State'] != 'FINISHED' or \
+            profileTree.nodes[1].info_strings['Query Status'] != 'OK':
+            return
+
         operators = {}
         fragments = {}
         queryId = self.db.queries.insert({})
@@ -189,6 +193,21 @@ class ProfileAnalyzer:
                         currFragment['code_gen'][counter.name].append(self.getCounterValue(counter))
                 continue
 
+            match = re.match('^HdfsTableSink$', profileNode.name)
+            if match:
+                if isAveragedFragment:
+                    currFragment['avg_hdfs_table_sink'] = {}
+                    for counter in profileNode.counters:
+                        currFragment['avg_hdfs_table_sink'][counter.name] = self.getCounterValue(counter)
+                else:
+                    if 'hdfs_table_sink' not in currFragment:
+                        currFragment['hdfs_table_sink'] = {}
+                    for counter in profileNode.counters:
+                        if counter.name not in currFragment['hdfs_table_sink']:
+                            currFragment['hdfs_table_sink'][counter.name] = []
+                        currFragment['hdfs_table_sink'][counter.name].append(self.getCounterValue(counter))
+                continue
+
             match = re.match('^(?P<name>.+_NODE) \(id=(?P<id>[0-9]+)\)$', profileNode.name)
             if match:
                 operator = operators[int(match.group('id'))]
@@ -231,7 +250,7 @@ class ProfileAnalyzer:
         hdfsScans = self.db.operators.find({'query_id': queryId, 'name': 'SCAN HDFS'})
         query = {
             'tag': tag,
-            'sql': profileTree.nodes[1].info_strings['Sql Statement'],
+            'sql': {'stmt': profileTree.nodes[1].info_strings['Sql Statement']},
             'runtime': profileTree.nodes[1].event_sequences[0].timestamps[-1], # nanoseconds
             # Start execution + Planning finished
             'plan_time': profileTree.nodes[1].event_sequences[0].timestamps[1],
@@ -361,6 +380,13 @@ class ProfileAnalyzer:
         for key, value in fragment['avg_code_gen'].iteritems():
             if value != (sum(fragment['code_gen'][key]) / len(fragment['code_gen'][key])):
                 print '%s %s %s %s' % (fragment['id'], key, value, fragment['code_gen'][key])
+
+        if 'avg_hdfs_table_sink' not in fragment:
+            return
+
+        for key, value in fragment['avg_hdfs_table_sink'].iteritems():
+            if value != (sum(fragment['hdfs_table_sink'][key]) / len(fragment['hdfs_table_sink'][key])):
+                print '%s %s %s %s' % (fragment['id'], key, value, fragment['hdfs_table_sink'][key])
 
     def checkJoinOperator(self, operator, operators):
         if operator['name'] not in ('HASH JOIN', 'CROSS JOIN'):
