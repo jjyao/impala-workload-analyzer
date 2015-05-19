@@ -134,7 +134,7 @@ class ProfileAnalyzer:
                 continue
 
             match = re.match(
-                '^\s+\|?\s+tuple-ids=(?P<tuple_ids>[0-9,]+) row-size=(?P<row_size>[0-9.]+[GMKB]+) cardinality=(?P<cardinality>[0-9]+|unavailable)\s*$',
+                '^\s+[| ]+tuple-ids=(?P<tuple_ids>[0-9,N]+) row-size=(?P<row_size>[0-9.]+[GMKB]+) cardinality=(?P<cardinality>[0-9]+|unavailable)\s*$',
                 line)
             if match:
                 cardinality = match.group('cardinality')
@@ -243,8 +243,12 @@ class ProfileAnalyzer:
         for fragment in fragments.itervalues():
             self.db.fragments.insert(fragment)
 
-        hosts = re.findall('(?P<host>[^() ]+:[0-9]+)',
-                profileTree.nodes[3].info_strings['Per Node Peak Memory Usage'])
+        if 'Per Node Peak Memory Usage' in profileTree.nodes[3].info_strings:
+            hosts = re.findall('(?P<host>[^() ]+:[0-9]+)',
+                    profileTree.nodes[3].info_strings['Per Node Peak Memory Usage'])
+        else:
+            # queries like 'SELECT 1'
+            hosts = [profileTree.nodes[1].info_strings['Coordinator']]
         hosts.sort()
 
         hdfsScans = self.db.operators.find({'query_id': queryId, 'name': 'SCAN HDFS'})
