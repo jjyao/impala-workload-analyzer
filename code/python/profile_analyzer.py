@@ -336,6 +336,11 @@ class ProfileAnalyzer:
             return
 
         for key, value in operator['avg_counters'].iteritems():
+            # these two counters are ignored for averages
+            # https://github.com/cloudera/Impala/blob/cdh5-trunk/be/src/util/runtime-profile.cc
+            if key in ('InactiveTotalTime', 'AsyncTotalTime'):
+                continue
+
             if value != (sum(operator['counters'][key]) / len(operator['counters'][key])):
                 print '%s %s %s %s %s' % (operator['name'], operator['id'], key, value, operator['counters'][key])
 
