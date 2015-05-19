@@ -224,7 +224,7 @@ class ProfileAnalyzer:
         for fragment in fragments.itervalues():
             self.db.fragments.insert(fragment)
 
-        hosts = re.findall('(?P<host>[^() ]+:[0-9]+)', \
+        hosts = re.findall('(?P<host>[^() ]+:[0-9]+)',
                 profileTree.nodes[3].info_strings['Per Node Peak Memory Usage'])
         hosts.sort()
 
@@ -238,16 +238,26 @@ class ProfileAnalyzer:
             # Ready to start remote fragments + Remote fragments started
             'fragment_start_time': profileTree.nodes[1].event_sequences[0].timestamps[3] - \
                     profileTree.nodes[1].event_sequences[0].timestamps[1],
-            'start_time': self.datetimeToMicroseconds(datetime.datetime.strptime(profileTree.nodes[1].info_strings['Start Time'], \
-                                        '%Y-%m-%d %H:%M:%S.%f000')),
-            'end_time': self.datetimeToMicroseconds(datetime.datetime.strptime(profileTree.nodes[1].info_strings['End Time'], \
-                                        '%Y-%m-%d %H:%M:%S.%f000')),
+            'start_time': self.datetimeToMicroseconds(
+                    datetime.datetime.strptime(profileTree.nodes[1].info_strings['Start Time'],
+                        '%Y-%m-%d %H:%M:%S.%f000')),
+            'end_time': self.datetimeToMicroseconds(
+                    datetime.datetime.strptime(profileTree.nodes[1].info_strings['End Time'],
+                        '%Y-%m-%d %H:%M:%S.%f000')),
             'hosts': hosts,
             'cluster': hashlib.md5(' '.join(hosts)).hexdigest(),
             'num_hosts': max([operator['num_hosts'] for operator in operators.itervalues()]),
             'num_hdfs_scans': hdfsScans.count(),
             'num_tables': len(hdfsScans.distinct('table'))
         }
+
+        match = re.match('^impalad version (?P<impala_version>[^ ]+) (?P<impala_flag>[^ ]+) \(build (?P<impala_build>[0-9a-zA-Z]+)\)$',
+                profileTree.nodes[1].info_strings['Impala Version'])
+        query.update({
+            'impala_version': match.group('impala_version'),
+            'impala_flag': match.group('impala_flag'),
+            'impala_build': match.group('impala_build'),
+        })
 
         assert len(query['hosts']) >= query['num_hosts']
 
