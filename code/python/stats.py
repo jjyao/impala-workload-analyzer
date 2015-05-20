@@ -1,9 +1,11 @@
 import sys
 import numpy
 import pymongo
+from matplotlib import cm
 from matplotlib import pyplot
 
-def hist(data, minval, maxval, xlabel, ylabel, title, output):
+def hist(data, minval, maxval, xlabel, ylabel, title, output, **kwargs):
+    ylog = kwargs.get('ylog', False)
     pyplot.clf()
     min_num_bins = 10
     max_num_bins = 10
@@ -14,26 +16,41 @@ def hist(data, minval, maxval, xlabel, ylabel, title, output):
         bins = range(start, stop, step)
     else:
         bins = numpy.arange(start, stop, step)
-    pyplot.hist(data, bins)
+    pyplot.hist(data, bins, log=ylog)
     pyplot.xlabel(xlabel)
     pyplot.ylabel(ylabel)
     pyplot.title(title)
     pyplot.tight_layout()
     pyplot.savefig('%s/%s' % (outputDir, output))
 
-def bar(data, minval, maxval, xlabel, ylabel, title, output):
+def bar(data, minval, maxval, xlabel, ylabel, title, output, **kwargs):
+    ylog = kwargs.get('ylog', False)
     pyplot.clf()
     height = [0] * (maxval + 1 - minval)
     for i in data:
         height[i - minval] += 1
     left = numpy.arange(minval, maxval + 1)
-    pyplot.bar(left, height, align = 'center')
+    pyplot.bar(left, height, align = 'center', log=ylog)
     pyplot.xlabel(xlabel)
     pyplot.ylabel(ylabel)
     pyplot.xticks(left)
     pyplot.title(title)
     pyplot.tight_layout()
     pyplot.savefig('%s/%s' % (outputDir, output))
+
+def stacked_bar(data, ylabel, legends, title, output):
+    pyplot.clf()
+    bars = []
+    left = numpy.arange(1)
+    y_offset = 0
+    for i in xrange(len(data)):
+        bars.append(pyplot.bar(left, (data[i],), align = 'center', bottom = (y_offset,), color=cm.jet(1.0 * i / len(data))))
+        y_offset += data[i]
+    pyplot.ylabel(ylabel)
+    pyplot.xticks(left)
+    pyplot.legend((bar[0] for bar in bars), legends, loc='center right', bbox_to_anchor=(0.1, 0.5))
+    pyplot.title(title)
+    pyplot.savefig('%s/%s' % (outputDir, output), bbox_inches='tight')
 
 def pie(data, labels, title, output):
     pyplot.clf()
@@ -67,83 +84,159 @@ hdfs_scan_size = []
 runtime = []
 
 sum_time_pct = {}
+sum_time_abs = {}
 
 num_limit = 0
 
 num_queries = queries.count()
 
 for query in queries:
+    operators = list(db.operators.find({'query_id': query['_id']},
+        {'avg_time': True, 'max_time': True, 'id': True, 'name': True}))
+    for operator in operators:
+        operator['diff_time'] = operator['max_time'] - operator['avg_time']
+    operators.sort(key=lambda operator: operator['diff_time'], reverse=True)
+    stacked_bar([operator['diff_time'] / 1000000 for operator in operators],
+        'Time Diff', ['%s:%s %sms' % (operator['id'], operator['name'], operator['diff_time'] / 1000000) for operator in operators],
+        'Operator Time Diff (ms)',
+        '%s_stacked_time_diff.png' % query['_id'])
+
     operators = db.operators.aggregate([
         {'$match': {'query_id': query['_id']}},
         {'$group': {'_id': '$name', 'avg_time': {'$sum': '$avg_time'}}},
     ])['result']
+
     code_gen_time = db.fragments.aggregate([
         {'$match': {'query_id': query['_id']}},
         {'$group': {'_id': None, 'total_time': {'$sum': '$avg_code_gen.TotalTime'}}},
     ])['result'][0]['total_time']
+    hdfs_table_sink_time = db.fragments.aggregate([
+        {'$match': {'query_id': query['_id']}},
+        {'$group': {'_id': None, 'total_time': {'$sum': '$avg_hdfs_table_sink.TotalTime'}}},
+    ])['result'][0]['total_time']
     sum_time = float(sum(operator['avg_time'] for operator in operators)) + \
-            query['plan_time'] + query['fragment_start_time'] + code_gen_time
+            query['plan_time'] + query['fragment_start_time'] + \
+            code_gen_time + hdfs_table_sink_time
     for operator in operators:
         operator['time_pct'] = operator['avg_time'] / sum_time
-    # add three special operators
+    # add special operators
     operators.append({
         '_id': 'Plan',
+        'avg_time': query['plan_time'],
         'time_pct': query['plan_time'] / sum_time,
     })
     operators.append({
         '_id': 'Fragment Start',
+        'avg_time': query['fragment_start_time'],
         'time_pct': query['fragment_start_time'] / sum_time,
     })
     operators.append({
         '_id': 'CodeGen',
+        'avg_time': code_gen_time,
         'time_pct': code_gen_time / sum_time,
     })
+    operators.append({
+        '_id': 'HdfsTableSink',
+        'avg_time': hdfs_table_sink_time,
+        'time_pct': hdfs_table_sink_time / sum_time,
+    })
+
+    operators.sort(key=lambda operator: operator['avg_time'], reverse=True)
+    stacked_bar([operator['avg_time'] / 1000000 for operator in operators],
+        'Time', ['%s %sms' % (operator['_id'], operator['avg_time'] / 1000000) for operator in operators],
+        'Operator Avg Time (ms)',
+        '%s_stacked_time.png' % query['_id'])
+
     for operator in operators:
         if operator['_id'] not in sum_time_pct:
             sum_time_pct[operator['_id']] = operator['time_pct']
         else:
             sum_time_pct[operator['_id']] += operator['time_pct']
 
+        if operator['_id'] not in sum_time_abs:
+            sum_time_abs[operator['_id']] = operator['avg_time']
+        else:
+            sum_time_abs[operator['_id']] += operator['avg_time']
+
     num_joins.append(
-            db.operators.find({'query_id': query['_id'], 'name': 'HASH JOIN'}).count())
+            db.operators.find({
+                'query_id': query['_id'],
+                'name': {'$in': ['HASH JOIN', 'CROSS JOIN']}
+            }).count())
 
     num_broadcast_joins.append(
-            db.operators.find({'query_id': query['_id'], 'name': 'HASH JOIN', 'join_impl': 'BROADCAST'}).count())
+            db.operators.find({
+                'query_id': query['_id'],
+                'name': {'$in': ['HASH JOIN', 'CROSS JOIN']},
+                'join_impl': 'BROADCAST'
+            }).count())
 
     num_partitioned_joins.append(
-            db.operators.find({'query_id': query['_id'], 'name': 'HASH JOIN', 'join_impl': 'PARTITIONED'}).count())
+            db.operators.find({
+                'query_id': query['_id'],
+                'name': {'$in': ['HASH JOIN', 'CROSS JOIN']},
+                'join_impl': 'PARTITIONED'
+            }).count())
 
     num_inner_joins.append(
-            db.operators.find({'query_id': query['_id'], 'name': 'HASH JOIN', 'join_type': 'INNER JOIN'}).count())
+            db.operators.find({
+                'query_id': query['_id'],
+                'name': 'HASH JOIN',
+                'join_type': 'INNER JOIN'
+            }).count())
 
-    hdfs_scan_size.append(
-            db.operators.aggregate([
+    scan_hdfs = db.operators.aggregate([
                 {'$match': {'query_id': query['_id'], 'name': 'SCAN HDFS'}},
                 {'$group': {'_id': None, 'size': {'$sum': '$size'}}},
-            ])['result'][0]['size'] / 1024 / 1024)
+            ])['result']
+    if scan_hdfs:
+        hdfs_scan_size.append(scan_hdfs[0]['size'] / 1024 / 1024)
+    else:
+        hdfs_scan_size.append(0)
 
     num_tables.append(query['num_tables'])
 
     num_hdfs_scans.append(query['num_hdfs_scans'])
 
-    num_output_columns.append(query['num_output_columns'])
-
-    num_from_subqueries.append(query['num_from_subqueries'])
+    if query['sql']['type'] == 'SELECT':
+        num_output_columns.append(query['sql']['num_output_columns'])
+        num_from_subqueries.append(query['sql']['num_from_subqueries'])
+    elif query['sql']['type'] == 'INSERT' and 'query' in query['sql']:
+        assert query['sql']['query']['type'] == 'SELECT'
+        num_output_columns.append(query['sql']['query']['num_output_columns'])
+        num_from_subqueries.append(query['sql']['query']['num_from_subqueries'])
+    elif query['sql']['type'] == 'UNION':
+        # TODO
+        num_output_columns.append(0)
+        num_from_subqueries.append(0)
+    else:
+        num_output_columns.append(query['sql']['num_output_columns'])
+        num_from_subqueries.append(query['sql']['num_from_subqueries'])
 
     runtime.append(query['runtime'] / 1000000000)
 
     try:
-        num_group_by_columns.append(query['num_group_by_columns'])
+        if query['sql']['type'] == 'SELECT':
+            num_group_by_columns.append(query['sql']['num_group_by_columns'])
+        else:
+            num_group_by_columns.append(query['sql']['query']['num_group_by_columns'])
     except KeyError:
         num_group_by_columns.append(0)
 
     try:
-        num_order_by_columns.append(query['num_order_by_columns'])
+        if query['sql']['type'] == 'SELECT':
+            num_order_by_columns.append(query['sql']['num_order_by_columns'])
+        else:
+            num_order_by_columns.append(query['sql']['query']['num_order_by_columns'])
     except KeyError:
         num_order_by_columns.append(0)
 
-    if 'limit' in query:
-        num_limit += 1
+    if query['sql']['type'] == 'SELECT':
+        if 'limit' in query['sql']:
+            num_limit += 1
+    else:
+        if 'query' in query['sql'] and 'limit' in query['sql']['query']:
+            num_limit += 1
 
 min_num_joins = min(num_joins)
 max_num_joins = max(num_joins)
@@ -236,12 +329,12 @@ hist(num_output_columns, min_num_output_columns, max_num_output_columns,
         "Number of Output Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_output_columns, max_num_output_columns, avg_num_output_columns),
-        "num_output_columns_hist.png")
+        "num_output_columns_hist.png", ylog=True)
 bar(num_output_columns, min_num_output_columns, max_num_output_columns,
         "Number of Output Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_num_output_columns, max_num_output_columns, avg_num_output_columns),
-        "num_output_columns_bar.png")
+        "num_output_columns_bar.png", ylog=True)
 
 min_num_group_by_columns = min(num_group_by_columns)
 max_num_group_by_columns = max(num_group_by_columns)
@@ -301,10 +394,17 @@ hist(runtime, min_runtime, max_runtime,
         "Runtime (s)", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (min_runtime, max_runtime, avg_runtime),
-        "runtime.png")
+        "runtime.png", ylog=True)
 
 avg_time_pct = {name: (pct / num_queries) for name, pct in sum_time_pct.items()}
 pie(avg_time_pct.values(), avg_time_pct.keys(), "Operator Avg Time Percent", "time_pct_pie.png")
+
+sum_time_abs = sum_time_abs.items()
+sum_time_abs.sort(key=lambda operator: operator[1], reverse=True)
+stacked_bar([operator[1] / 1000000 for operator in sum_time_abs],
+        'Time', ['%s %sms' % (operator[0], operator[1] / 1000000) for operator in sum_time_abs],
+        'Operator Sum Time (ms)',
+        'stacked_time.png')
 
 print 'limit_pct %s%%' % (num_limit / float(num_queries) * 100)
 
