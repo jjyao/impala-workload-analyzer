@@ -3,62 +3,49 @@ package com.cloudera.impala.analysis;
 import com.mongodb.*;
 
 import java.io.StringReader;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class QueryAnalyzer {
+    public static Map<String, Object> analyzeInsertQuery(InsertStmt stmt) {
+        Map<String, Object> analyzedQuery = new HashMap<String, Object>();
+
+        analyzedQuery.put("type", "INSERT");
+
+        analyzedQuery.put("overwrite", stmt.isOverwrite());
+
+        if (stmt.getQueryStmt() instanceof SelectStmt) {
+            analyzedQuery.put("query", analyzeSelectQuery((SelectStmt) stmt.getQueryStmt()));
+        }
+
+        return analyzedQuery;
+    }
+
+    public static Map<String, Object> analyzeUnionQuery(UnionStmt stmt) {
+        Map<String, Object> analyzedQuery = new HashMap<String, Object>();
+
+        analyzedQuery.put("type", "UNION");
+
+        List<Map<String, Object>> analyzedQueries = new ArrayList<Map<String, Object>>();
+        for (UnionStmt.UnionOperand operand: stmt.getOperands()) {
+            if (operand.getQueryStmt() instanceof SelectStmt) {
+                analyzedQueries.add(analyzeSelectQuery((SelectStmt) operand.getQueryStmt()));
+            }
+        }
+        analyzedQuery.put("queries", analyzedQueries);
+
+        return analyzedQuery;
+    }
+
     public static Map<String, Object> analyzeSelectQuery(SelectStmt stmt) {
         Map<String, Object> analyzedQuery = new HashMap<String, Object>();
 
+        analyzedQuery.put("type", "SELECT");
+
         SelectList selectList = stmt.getSelectList();
         analyzedQuery.put("num_output_columns", selectList.getItems().size());
-
-        /*
-        Map<String, Set<String>> tableToColumnsMap = new HashMap<String, Set<String>>();
-        for (SelectListItem item : selectList.getItems()) {
-            String tableName = null;
-            if (item.getTblName() != null) {
-                tableName = item.getTblName().getTbl();
-            }
-            String columnName = null;
-            Expr expr = item.getExpr();
-            if (expr instanceof SlotRef) {
-                columnName =((SlotRef)expr).getColumnName();
-            } else if (expr instanceof FunctionCallExpr) {
-                assert expr.getChildren().size() == 1;
-                columnName = ((SlotRef)expr.getChild(0)).getColumnName();
-            } else {
-                continue;
-            }
-
-            if (tableName == null) {
-                // this column name should be unique among all columns
-                boolean exist = false;
-                for (Set<String> columns : tableToColumnsMap.values()) {
-                    if (columns.contains(columnName)) {
-                        exist = true;
-                        break;
-                    }
-                }
-
-                if (exist) {
-                    continue;
-                }
-            } else {
-                if (tableToColumnsMap.containsKey(null) &&
-                        tableToColumnsMap.get(null).contains(columnName)) {
-                    // replace with the specific table
-                    tableToColumnsMap.get(null).remove(columnName);
-                }
-            }
-
-            if (!tableToColumnsMap.containsKey(tableName)) {
-                tableToColumnsMap.put(tableName, new HashSet<String>());
-            }
-
-            tableToColumnsMap.get(tableName).add(columnName);
-        }
-        */
 
         int num_from_subqueries = 0;
         for (TableRef tableRef : stmt.getTableRefs()) {
@@ -84,18 +71,23 @@ public class QueryAnalyzer {
     }
 
     public static void analyzeQuery(DBCollection queries, DBObject query) throws Exception {
-        String sql = (String)query.get("sql");
+        String sql = (String) ((DBObject) query.get("sql")).get("stmt");
         SqlScanner scanner = new SqlScanner(new StringReader(sql));
         SqlParser parser = new SqlParser(scanner);
         Object stmt = parser.parse().value;
         Map<String, Object> analyzedQuery;
         if (stmt instanceof SelectStmt) {
             analyzedQuery = analyzeSelectQuery((SelectStmt) stmt);
+        } else if (stmt instanceof InsertStmt) {
+            analyzedQuery = analyzeInsertQuery((InsertStmt) stmt);
+        } else if (stmt instanceof UnionStmt) {
+            analyzedQuery = analyzeUnionQuery((UnionStmt) stmt);
         } else {
             return;
         }
 
-        queries.update(query, new BasicDBObject("$set", new BasicDBObject(analyzedQuery)));
+        analyzedQuery.put("stmt", sql);
+        queries.update(query, new BasicDBObject("$set", new BasicDBObject("sql", new BasicDBObject(analyzedQuery))));
     }
 
     public static void main(String[] args) throws Exception {
