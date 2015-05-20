@@ -21,12 +21,35 @@ class ProfileAnalyzer:
                 unique=True)
 
     def analyze(self, profileTree, tag):
-        if 'ExecSummary' not in profileTree.nodes[1].info_strings:
-            # skip queries like 'GET_SCHEMAS'
-            return
-
         if profileTree.nodes[1].info_strings['Query State'] != 'FINISHED' or \
             profileTree.nodes[1].info_strings['Query Status'] != 'OK':
+            return
+
+        # https://github.com/cloudera/Impala/blob/cdh5-trunk/be/src/service/impala-server.cc
+        queryType = profileTree.nodes[1].info_strings['Query Type']
+        if queryType == 'QUERY':
+            self.analyzeQuery(profileTree, tag)
+        elif queryType == 'DDL':
+            self.analyzeDDL(profileTree, tag)
+        elif queryType == 'DML':
+            self.analyzeQuery(profileTree, tag)
+        else:
+            return
+
+    def analyzeDDL(self, profileTree, tag):
+        hosts = [profileTree.nodes[1].info_strings['Coordinator']]
+        query = self.query(profileTree)
+        query.update({
+            'tag': tag,
+            'hosts': hosts,
+            'cluster': hashlib.md5(' '.join(hosts)).hexdigest(),
+            'num_hosts': len(hosts),
+        })
+        self.db.queries.insert(query)
+
+    def analyzeQuery(self, profileTree, tag):
+        if 'ExecSummary' not in profileTree.nodes[1].info_strings:
+            # skip queries like 'GET_SCHEMAS'
             return
 
         operators = {}
@@ -258,26 +281,39 @@ class ProfileAnalyzer:
         hosts.sort()
 
         hdfsScans = self.db.operators.find({'query_id': queryId, 'name': 'SCAN HDFS'})
-        query = {
+        query = self.query(profileTree)
+        query.update({
             'tag': tag,
-            'sql': {'stmt': profileTree.nodes[1].info_strings['Sql Statement']},
-            'runtime': profileTree.nodes[1].event_sequences[0].timestamps[-1], # nanoseconds
             # Start execution + Planning finished
             'plan_time': profileTree.nodes[1].event_sequences[0].timestamps[1],
             # Ready to start remote fragments + Remote fragments started
             'fragment_start_time': profileTree.nodes[1].event_sequences[0].timestamps[3] - \
                     profileTree.nodes[1].event_sequences[0].timestamps[1],
+            'hosts': hosts,
+            'cluster': hashlib.md5(' '.join(hosts)).hexdigest(),
+            'num_hosts': max([operator['num_hosts'] for operator in operators.itervalues()]),
+            'num_hdfs_scans': hdfsScans.count(),
+            'num_tables': len(hdfsScans.distinct('table'))
+        })
+
+        assert len(query['hosts']) >= query['num_hosts']
+
+        self.db.queries.update(
+            {'_id': queryId},
+            {'$set': query}
+        )
+
+    def query(self, profileTree):
+        query = {
+            'query_type': profileTree.nodes[1].info_strings['Query Type'],
+            'sql': {'stmt': profileTree.nodes[1].info_strings['Sql Statement']},
+            'runtime': profileTree.nodes[1].event_sequences[0].timestamps[-1], # nanoseconds
             'start_time': self.datetimeToMicroseconds(
                     datetime.datetime.strptime(profileTree.nodes[1].info_strings['Start Time'],
                         '%Y-%m-%d %H:%M:%S.%f000')),
             'end_time': self.datetimeToMicroseconds(
                     datetime.datetime.strptime(profileTree.nodes[1].info_strings['End Time'],
                         '%Y-%m-%d %H:%M:%S.%f000')),
-            'hosts': hosts,
-            'cluster': hashlib.md5(' '.join(hosts)).hexdigest(),
-            'num_hosts': max([operator['num_hosts'] for operator in operators.itervalues()]),
-            'num_hdfs_scans': hdfsScans.count(),
-            'num_tables': len(hdfsScans.distinct('table'))
         }
 
         match = re.match('^impalad version (?P<impala_version>[^ ]+) (?P<impala_flag>[^ ]+) \(build (?P<impala_build>[0-9a-zA-Z]+)\)$',
@@ -288,12 +324,7 @@ class ProfileAnalyzer:
             'impala_build': match.group('impala_build'),
         })
 
-        assert len(query['hosts']) >= query['num_hosts']
-
-        self.db.queries.update(
-            {'_id': queryId},
-            {'$set': query}
-        )
+        return query
 
     def datetimeToMicroseconds(self, datetime):
         return long(time.mktime(datetime.timetuple()) * 1e6) + datetime.microsecond

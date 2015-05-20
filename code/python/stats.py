@@ -61,9 +61,9 @@ def pie(data, labels, title, output):
     pyplot.savefig('%s/%s' % (outputDir, output), bbox_inches='tight')
 
 db = pymongo.MongoClient().impala
-
-queries = db.queries.find({'tag': sys.argv[1]})
 outputDir = sys.argv[2]
+
+queries = db.queries.find({'tag': sys.argv[1], 'sql.type': {'$in': ['SelectStmt', 'InsertStmt', 'UnionStmt']}})
 
 num_joins = []
 num_broadcast_joins = []
@@ -198,14 +198,14 @@ for query in queries:
 
     num_hdfs_scans.append(query['num_hdfs_scans'])
 
-    if query['sql']['type'] == 'SELECT':
+    if query['sql']['type'] == 'SelectStmt':
         num_output_columns.append(query['sql']['num_output_columns'])
         num_from_subqueries.append(query['sql']['num_from_subqueries'])
-    elif query['sql']['type'] == 'INSERT' and 'query' in query['sql']:
-        assert query['sql']['query']['type'] == 'SELECT'
+    elif query['sql']['type'] == 'InsertStmt' and 'query' in query['sql']:
+        assert query['sql']['query']['type'] == 'SelectStmt'
         num_output_columns.append(query['sql']['query']['num_output_columns'])
         num_from_subqueries.append(query['sql']['query']['num_from_subqueries'])
-    elif query['sql']['type'] == 'UNION':
+    elif query['sql']['type'] == 'UnionStmt':
         # TODO
         num_output_columns.append(0)
         num_from_subqueries.append(0)
@@ -216,7 +216,7 @@ for query in queries:
     runtime.append(query['runtime'] / 1000000000)
 
     try:
-        if query['sql']['type'] == 'SELECT':
+        if query['sql']['type'] == 'SelectStmt':
             num_group_by_columns.append(query['sql']['num_group_by_columns'])
         else:
             num_group_by_columns.append(query['sql']['query']['num_group_by_columns'])
@@ -224,14 +224,14 @@ for query in queries:
         num_group_by_columns.append(0)
 
     try:
-        if query['sql']['type'] == 'SELECT':
+        if query['sql']['type'] == 'SelectStmt':
             num_order_by_columns.append(query['sql']['num_order_by_columns'])
         else:
             num_order_by_columns.append(query['sql']['query']['num_order_by_columns'])
     except KeyError:
         num_order_by_columns.append(0)
 
-    if query['sql']['type'] == 'SELECT':
+    if query['sql']['type'] == 'SelectStmt':
         if 'limit' in query['sql']:
             num_limit += 1
     else:

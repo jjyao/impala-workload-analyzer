@@ -9,10 +9,18 @@ import java.util.List;
 import java.util.Map;
 
 public class QueryAnalyzer {
+    public static Map<String, Object> analyzeQuery(Object stmt) {
+        Map<String, Object> analyzedQuery = new HashMap<String, Object>();
+
+        analyzedQuery.put("type", stmt.getClass().getSimpleName());
+
+        return analyzedQuery;
+    }
+
     public static Map<String, Object> analyzeInsertQuery(InsertStmt stmt) {
         Map<String, Object> analyzedQuery = new HashMap<String, Object>();
 
-        analyzedQuery.put("type", "INSERT");
+        analyzedQuery.put("type", stmt.getClass().getSimpleName());
 
         analyzedQuery.put("overwrite", stmt.isOverwrite());
 
@@ -26,7 +34,7 @@ public class QueryAnalyzer {
     public static Map<String, Object> analyzeUnionQuery(UnionStmt stmt) {
         Map<String, Object> analyzedQuery = new HashMap<String, Object>();
 
-        analyzedQuery.put("type", "UNION");
+        analyzedQuery.put("type", stmt.getClass().getSimpleName());
 
         List<Map<String, Object>> analyzedQueries = new ArrayList<Map<String, Object>>();
         for (UnionStmt.UnionOperand operand: stmt.getOperands()) {
@@ -42,7 +50,7 @@ public class QueryAnalyzer {
     public static Map<String, Object> analyzeSelectQuery(SelectStmt stmt) {
         Map<String, Object> analyzedQuery = new HashMap<String, Object>();
 
-        analyzedQuery.put("type", "SELECT");
+        analyzedQuery.put("type", stmt.getClass().getSimpleName());
 
         SelectList selectList = stmt.getSelectList();
         analyzedQuery.put("num_output_columns", selectList.getItems().size());
@@ -83,7 +91,7 @@ public class QueryAnalyzer {
         } else if (stmt instanceof UnionStmt) {
             analyzedQuery = analyzeUnionQuery((UnionStmt) stmt);
         } else {
-            return;
+            analyzedQuery = analyzeQuery(stmt);
         }
 
         analyzedQuery.put("stmt", sql);
