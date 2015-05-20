@@ -96,15 +96,21 @@ class ProfileAnalyzer:
                 if match.group('indent') is None:
                     parentOperator = parentOperators[0]
                 elif match.group('indent').endswith('--'):
-                    parentOperator = prevOperator
+                    indent = len(match.group('indent'))
+                    parentIndent = 0
+                    for key in parentOperators.iterkeys():
+                        if key < indent:
+                            parentIndent = max(parentIndent, key)
+                    parentOperator = parentOperators[parentIndent]
                 else:
-                    parentOperator = parentOperators[len(match.group('indent'))]
+                    parentIndent = len(match.group('indent'))
+                    parentOperator = parentOperators[parentIndent]
                 currOperator.update({
                     'fragment_id': fragment['id'],
                     'parent_id': None if parentOperator is None else parentOperator['id'],
                 })
 
-                if parentOperator is not None and parentOperator['name'] in ('HASH JOIN', 'CROSS JOIN', 'UNION'):
+                if parentOperator is not None and parentOperator['name'] in ('HASH JOIN', 'CROSS JOIN'):
                     # right child first
                     if 'right_child_id' not in parentOperator:
                         parentOperator['right_child_id'] = currOperator['id']
