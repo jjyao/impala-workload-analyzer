@@ -331,7 +331,11 @@ plots.hist(runtime, min_runtime, max_runtime,
         "runtime.png", ylog=True)
 
 avg_time_pct = {name: (pct / num_queries) for name, pct in sum_time_pct.items()}
-plots.pie(avg_time_pct.values(), avg_time_pct.keys(), "Operator Avg Time Percent", "time_pct_pie.png")
+plots.pie(avg_time_pct.values(), avg_time_pct.keys(), "Avg of Operator Time Percent", "avg_time_pct_pie.png")
+
+sum_time = float(sum(sum_time_abs.itervalues()))
+abs_time_pct = {name: (time / sum_time) for name, time in sum_time_abs.items()}
+plots.pie(abs_time_pct.values(), abs_time_pct.keys(), 'Operator Time Percent', 'abs_time_pct_pie.png')
 
 sum_time_abs = sum_time_abs.items()
 sum_time_abs.sort(key=lambda operator: operator[1], reverse=True)
@@ -342,7 +346,7 @@ plots.stacked_bar([operator[1] / 1000000 for operator in sum_time_abs],
 
 print 'limit_pct %s%%' % (num_limit / float(num_queries) * 100)
 
-clusters = db.queries.distinct('cluster', {'tag': tag})
+clusters = db.queries.find({'tag': tag}).distinct('cluster')
 for cluster in clusters:
     queries = db.queries.find({'cluster': cluster}, ['start_time', 'end_time'])
     times = []
