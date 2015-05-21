@@ -153,6 +153,16 @@ class ProfileAnalyzer:
                     currOperator.update({
                         'join_impl': match.group('detail'),
                     })
+                elif match.group('name') == 'AGGREGATE':
+                    if match.group('detail') is None:
+                        currOperator.update({
+                            'agg_type': 'PRE',
+                        })
+                    else:
+                        assert match.group('detail') == 'FINALIZE'
+                        currOperator.update({
+                            'agg_type': 'POST',
+                        })
 
                 prevOperator = currOperator
                 if match.group('indent') is None:

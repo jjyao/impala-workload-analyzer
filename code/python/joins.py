@@ -89,11 +89,11 @@ plots.stacked_bar(
         timeWrongJoinImpls / 1000000,
         timeWrongJoinOrders / 1000000,
     ],
-    'Time of Joins (ms)',
+    'Time of Joins',
     [
-        'Correct Join %s' % (timeCorrectJoins / 1000000),
-        'Wrong Join Impl %s' % (timeWrongJoinImpls / 1000000),
-        'Wrong Join Order %s' % (timeWrongJoinOrders / 1000000),
+        'Correct Join %sms' % (timeCorrectJoins / 1000000),
+        'Wrong Join Impl %sms' % (timeWrongJoinImpls / 1000000),
+        'Wrong Join Order %sms' % (timeWrongJoinOrders / 1000000),
     ],
     'Join Correctness',
     'stacked_time_join_correctness.png'
