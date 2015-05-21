@@ -261,7 +261,6 @@ class ProfileAnalyzer:
 
         for operator in operators.itervalues():
             self.checkOperatorConsistency(operator)
-            self.checkJoinOperator(operator, operators)
 
         for fragment in fragments.itervalues():
             self.checkFragmentConsistency(fragment)
@@ -428,29 +427,3 @@ class ProfileAnalyzer:
         for key, value in fragment['avg_hdfs_table_sink'].iteritems():
             if value != (sum(fragment['hdfs_table_sink'][key]) / len(fragment['hdfs_table_sink'][key])):
                 print '%s %s %s %s' % (fragment['id'], key, value, fragment['hdfs_table_sink'][key])
-
-    def checkJoinOperator(self, operator, operators):
-        if operator['name'] not in ('HASH JOIN', 'CROSS JOIN'):
-            return
-
-        left_child = operators[operator['left_child_id']]
-        right_child = operators[operator['right_child_id']]
-
-        # check if impala uses the wrong join implementation
-        broadcast_join_cost = min(left_child['num_rows'] * left_child['row_size'],
-                right_child['num_rows'] * right_child['row_size']) * operator['num_hosts']
-        partitioned_join_cost = left_child['num_rows'] * left_child['row_size'] + \
-                right_child['num_rows'] * right_child['row_size']
-        if broadcast_join_cost < partitioned_join_cost:
-            if operator['join_impl'] != 'BROADCAST':
-                print 'BAD JOIN IMPLEMENTATION %s' % operator['id']
-                return
-        else:
-            if operator['join_impl'] != 'PARTITIONED':
-                print 'BAD JOIN IMPLEMENTATION %s' % operator['id']
-                return
-
-        if operator['join_impl'] == 'BROADCAST':
-            # http://www.cloudera.com/content/cloudera/en/documentation/cloudera-impala/latest/topics/impala_perf_joins.html
-            if left_child['num_rows'] * left_child['row_size'] < right_child['num_rows'] * right_child['row_size']:
-                print 'BAD BROADCAST JOIN %s' % operator['id']
