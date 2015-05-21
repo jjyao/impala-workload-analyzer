@@ -3,9 +3,10 @@ import plots
 import pymongo
 
 db = pymongo.MongoClient().impala
+tag = sys.argv[1]
 plots.outputDir = sys.argv[2]
 
-queries = db.queries.find({'tag': sys.argv[1], 'sql.type': {'$in': ['SelectStmt', 'InsertStmt', 'UnionStmt']}})
+queries = db.queries.find({'tag': tag, 'sql.type': {'$in': ['SelectStmt', 'InsertStmt', 'UnionStmt']}})
 
 num_joins = []
 num_broadcast_joins = []
@@ -341,7 +342,7 @@ plots.stacked_bar([operator[1] / 1000000 for operator in sum_time_abs],
 
 print 'limit_pct %s%%' % (num_limit / float(num_queries) * 100)
 
-clusters = db.queries.distinct('cluster')
+clusters = db.queries.distinct('cluster', {'tag': tag})
 for cluster in clusters:
     queries = db.queries.find({'cluster': cluster}, ['start_time', 'end_time'])
     times = []
@@ -363,3 +364,17 @@ for cluster in clusters:
     avg_num_concurrent_queries = float(sum_num_concurrent_queries) / sum_num_query_microseconds
     print max_num_concurrent_queries
     print avg_num_concurrent_queries
+
+queries = db.queries.aggregate([
+    {'$match': {'tag': tag}},
+    {'$group': {'_id': '$sql.type', 'runtime': {'$sum': '$runtime'}, 'count': {'$sum': 1}}},
+])['result']
+queries.sort(key=lambda query: query['count'], reverse=True)
+plots.stacked_bar([query['count'] for query in queries],
+        'Count', ['%s %s' % (query['_id'], query['count']) for query in queries],
+        '#Query',
+        'stacked_query_count.png')
+plots.stacked_bar([query['runtime'] / 1000000 for query in queries],
+        'Time', ['%s %sms' % (query['_id'], query['runtime'] / 1000000) for query in queries],
+        'Query Sum Time (ms)',
+        'stacked_query_time.png')
