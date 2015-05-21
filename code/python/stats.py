@@ -140,45 +140,36 @@ for query in queries:
 
     num_hdfs_scans.append(query['num_hdfs_scans'])
 
-    if query['sql']['type'] == 'SelectStmt':
+    runtime.append(query['runtime'] / 1000000000)
+
+    sqlType = query['sql']['type']
+    if sqlType == 'SelectStmt':
         num_output_columns.append(query['sql']['num_output_columns'])
         num_from_subqueries.append(query['sql']['num_from_subqueries'])
-    elif query['sql']['type'] == 'InsertStmt' and 'query' in query['sql']:
+        num_group_by_columns.append(query['sql']['num_group_by_columns'])
+        num_order_by_columns.append(query['sql']['num_order_by_columns'])
+
+        if 'limit' in query['sql']:
+            num_limit += 1
+    elif sqlType == 'InsertStmt':
         assert query['sql']['query']['type'] == 'SelectStmt'
         num_output_columns.append(query['sql']['query']['num_output_columns'])
         num_from_subqueries.append(query['sql']['query']['num_from_subqueries'])
-    elif query['sql']['type'] == 'UnionStmt':
-        # TODO
-        num_output_columns.append(0)
-        num_from_subqueries.append(0)
-    else:
-        num_output_columns.append(query['sql']['num_output_columns'])
-        num_from_subqueries.append(query['sql']['num_from_subqueries'])
+        num_group_by_columns.append(query['sql']['query']['num_group_by_columns'])
+        num_order_by_columns.append(query['sql']['query']['num_order_by_columns'])
 
-    runtime.append(query['runtime'] / 1000000000)
-
-    try:
-        if query['sql']['type'] == 'SelectStmt':
-            num_group_by_columns.append(query['sql']['num_group_by_columns'])
-        else:
-            num_group_by_columns.append(query['sql']['query']['num_group_by_columns'])
-    except KeyError:
-        num_group_by_columns.append(0)
-
-    try:
-        if query['sql']['type'] == 'SelectStmt':
-            num_order_by_columns.append(query['sql']['num_order_by_columns'])
-        else:
-            num_order_by_columns.append(query['sql']['query']['num_order_by_columns'])
-    except KeyError:
-        num_order_by_columns.append(0)
-
-    if query['sql']['type'] == 'SelectStmt':
-        if 'limit' in query['sql']:
+        if 'limit' in query['sql']['query']:
             num_limit += 1
-    else:
-        if 'query' in query['sql'] and 'limit' in query['sql']['query']:
-            num_limit += 1
+    elif sqlType == 'UnionStmt':
+        num_output_columns.append(max(subquery['num_output_columns'] for subquery in query['sql']['queries']))
+        num_from_subqueries.append(sum(subquery['num_from_subqueries'] for subquery in query['sql']['queries']))
+        num_group_by_columns.append(sum(subquery['num_group_by_columns'] for subquery in query['sql']['queries']))
+        num_order_by_columns.append(sum(subquery['num_order_by_columns'] for subquery in query['sql']['queries']))
+
+        for subquery in query['sql']['queries']:
+            if 'limit' in subquery:
+                num_limit += 1
+                break
 
 min_num_joins = min(num_joins)
 max_num_joins = max(num_joins)

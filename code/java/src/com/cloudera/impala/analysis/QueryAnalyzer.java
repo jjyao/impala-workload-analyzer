@@ -65,14 +65,18 @@ public class QueryAnalyzer {
 
         if (stmt.hasGroupByClause()) {
             analyzedQuery.put("num_group_by_columns", stmt.groupingExprs_.size());
+        } else {
+            analyzedQuery.put("num_group_by_columns", 0);
         }
 
         if (stmt.hasOrderByClause()) {
             analyzedQuery.put("num_order_by_columns", stmt.orderByElements_.size());
+        } else {
+            analyzedQuery.put("num_order_by_columns", 0);
         }
 
         if (stmt.hasLimit()) {
-            analyzedQuery.put("limit", ((NumericLiteral)stmt.limitElement_.getLimitExpr()).getIntValue());
+            analyzedQuery.put("limit", ((NumericLiteral) stmt.limitElement_.getLimitExpr()).getIntValue());
         }
 
         return analyzedQuery;
