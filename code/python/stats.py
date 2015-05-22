@@ -6,345 +6,354 @@ db = pymongo.MongoClient().impala
 tag = sys.argv[1]
 plots.outputDir = sys.argv[2]
 
-queries = db.queries.find({'tag': tag, 'sql.type': {'$in': ['SelectStmt', 'InsertStmt', 'UnionStmt']}})
+queries = db.queries.find({
+    'tag': tag,
+    'sql.type': {'$in': ['SelectStmt', 'InsertStmt', 'UnionStmt']}})
 
-num_joins = []
-num_broadcast_joins = []
-num_partitioned_joins = []
-num_inner_joins = []
-
-num_tables = []
-num_hdfs_scans = []
-
-num_from_subqueries = []
-
-num_output_columns = []
-num_group_by_columns = []
-num_order_by_columns = []
-
-hdfs_scan_size = []
-
+numJoins = []
+numBroadcastJoins = []
+numPartitionedJoins = []
+numInnerJoins = []
+numTables = []
+numHdfsScans = []
+numFromSubqueries = []
+numOutputColumns = []
+numGroupByColumns = []
+numOrderByColumns = []
+numLimits = 0
+numQueries = queries.count()
+hdfsScanSize = []
 runtime = []
-
-sum_time_pct = {}
-sum_time_abs = {}
-
-num_limit = 0
-
-num_queries = queries.count()
+timePctPerOperator = {}
+sumTimePerOperator = {}
 
 for query in queries:
-    operators = list(db.operators.find({'query_id': query['_id']},
-        {'avg_time': True, 'max_time': True, 'id': True, 'name': True}))
+    operators = list(db.operators.find({'query_id': query['_id']}))
     for operator in operators:
         operator['diff_time'] = operator['max_time'] - operator['avg_time']
     operators.sort(key=lambda operator: operator['diff_time'], reverse=True)
-    plots.stacked_bar([operator['diff_time'] / 1000000 for operator in operators],
-        'Time Diff', ['%s:%s %sms' % (operator['id'], operator['name'], operator['diff_time'] / 1000000) for operator in operators],
+    plots.stacked_bar(
+        [operator['diff_time'] / 1000000 for operator in operators],
+        'Time Diff',
+        ['%s:%s %sms' % (operator['id'], operator['name'], operator['diff_time'] / 1000000) for operator in operators],
         'Operator Time Diff (ms)',
         '%s_stacked_time_diff.png' % query['_id'])
 
     operators = db.operators.aggregate([
         {'$match': {'query_id': query['_id']}},
-        {'$group': {'_id': '$name', 'avg_time': {'$sum': '$avg_time'}}},
+        {'$group': {'_id': '$name', 'sum_time': {'$sum': '$avg_time'}}},
     ])['result']
 
-    code_gen_time = db.fragments.aggregate([
+    codeGenTime = db.fragments.aggregate([
         {'$match': {'query_id': query['_id']}},
-        {'$group': {'_id': None, 'total_time': {'$sum': '$avg_code_gen.TotalTime'}}},
-    ])['result'][0]['total_time']
-    hdfs_table_sink_time = db.fragments.aggregate([
+        {'$group': {'_id': None, 'sum_time': {'$sum': '$avg_code_gen.TotalTime'}}},
+    ])['result'][0]['sum_time']
+
+    hdfsTableSinkTime = db.fragments.aggregate([
         {'$match': {'query_id': query['_id']}},
-        {'$group': {'_id': None, 'total_time': {'$sum': '$avg_hdfs_table_sink.TotalTime'}}},
-    ])['result'][0]['total_time']
-    sum_time = float(sum(operator['avg_time'] for operator in operators)) + \
+        {'$group': {'_id': None, 'sum_time': {'$sum': '$avg_hdfs_table_sink.TotalTime'}}},
+    ])['result'][0]['sum_time']
+
+    sumTimeAllOperators = float(sum(operator['sum_time'] for operator in operators)) + \
             query['plan_time'] + query['fragment_start_time'] + \
-            code_gen_time + hdfs_table_sink_time
+            codeGenTime + hdfsTableSinkTime
+
     for operator in operators:
-        operator['time_pct'] = operator['avg_time'] / sum_time
+        operator['time_pct'] = operator['sum_time'] / sumTimeAllOperators
     # add special operators
     operators.append({
         '_id': 'Plan',
-        'avg_time': query['plan_time'],
-        'time_pct': query['plan_time'] / sum_time,
+        'sum_time': query['plan_time'],
+        'time_pct': query['plan_time'] / sumTimeAllOperators,
     })
     operators.append({
         '_id': 'Fragment Start',
-        'avg_time': query['fragment_start_time'],
-        'time_pct': query['fragment_start_time'] / sum_time,
+        'sum_time': query['fragment_start_time'],
+        'time_pct': query['fragment_start_time'] / sumTimeAllOperators,
     })
     operators.append({
         '_id': 'CodeGen',
-        'avg_time': code_gen_time,
-        'time_pct': code_gen_time / sum_time,
+        'sum_time': codeGenTime,
+        'time_pct': codeGenTime / sumTimeAllOperators,
     })
     operators.append({
         '_id': 'HdfsTableSink',
-        'avg_time': hdfs_table_sink_time,
-        'time_pct': hdfs_table_sink_time / sum_time,
+        'sum_time': hdfsTableSinkTime,
+        'time_pct': hdfsTableSinkTime / sumTimeAllOperators,
     })
 
-    operators.sort(key=lambda operator: operator['avg_time'], reverse=True)
-    plots.stacked_bar([operator['avg_time'] / 1000000 for operator in operators],
-        'Time', ['%s %sms' % (operator['_id'], operator['avg_time'] / 1000000) for operator in operators],
-        'Operator Avg Time (ms)',
+    operators.sort(key=lambda operator: operator['sum_time'], reverse=True)
+    plots.stacked_bar([operator['sum_time'] / 1000000 for operator in operators],
+        'Time', ['%s %sms' % (operator['_id'], operator['sum_time'] / 1000000) for operator in operators],
+        'Operator Sum Time (ms)',
         '%s_stacked_time.png' % query['_id'])
 
     for operator in operators:
-        if operator['_id'] not in sum_time_pct:
-            sum_time_pct[operator['_id']] = operator['time_pct']
-        else:
-            sum_time_pct[operator['_id']] += operator['time_pct']
+        if operator['_id'] not in timePctPerOperator:
+            timePctPerOperator[operator['_id']] = []
+        timePctPerOperator[operator['_id']].append(operator['time_pct'])
 
-        if operator['_id'] not in sum_time_abs:
-            sum_time_abs[operator['_id']] = operator['avg_time']
-        else:
-            sum_time_abs[operator['_id']] += operator['avg_time']
+        if operator['_id'] not in sumTimePerOperator:
+            sumTimePerOperator[operator['_id']] = []
+        sumTimePerOperator[operator['_id']].append(operator['sum_time'])
 
-    num_joins.append(
+    numJoins.append(
             db.operators.find({
                 'query_id': query['_id'],
                 'name': {'$in': ['HASH JOIN', 'CROSS JOIN']}
             }).count())
 
-    num_broadcast_joins.append(
+    numBroadcastJoins.append(
             db.operators.find({
                 'query_id': query['_id'],
                 'name': {'$in': ['HASH JOIN', 'CROSS JOIN']},
                 'join_impl': 'BROADCAST'
             }).count())
 
-    num_partitioned_joins.append(
+    numPartitionedJoins.append(
             db.operators.find({
                 'query_id': query['_id'],
                 'name': {'$in': ['HASH JOIN', 'CROSS JOIN']},
                 'join_impl': 'PARTITIONED'
             }).count())
 
-    num_inner_joins.append(
+    numInnerJoins.append(
             db.operators.find({
                 'query_id': query['_id'],
                 'name': 'HASH JOIN',
                 'join_type': 'INNER JOIN'
             }).count())
 
-    scan_hdfs = db.operators.aggregate([
+    scanHdfs = db.operators.aggregate([
                 {'$match': {'query_id': query['_id'], 'name': 'SCAN HDFS'}},
                 {'$group': {'_id': None, 'size': {'$sum': '$size'}}},
             ])['result']
-    if scan_hdfs:
-        hdfs_scan_size.append(scan_hdfs[0]['size'] / 1024 / 1024)
+    if scanHdfs:
+        hdfsScanSize.append(scanHdfs[0]['size'] / 1024 / 1024)
     else:
-        hdfs_scan_size.append(0)
+        hdfsScanSize.append(0)
 
-    num_tables.append(query['num_tables'])
+    numTables.append(query['num_tables'])
 
-    num_hdfs_scans.append(query['num_hdfs_scans'])
+    numHdfsScans.append(query['num_hdfs_scans'])
 
     runtime.append(query['runtime'] / 1000000000)
 
     sqlType = query['sql']['type']
     if sqlType == 'SelectStmt':
-        num_output_columns.append(query['sql']['num_output_columns'])
-        num_from_subqueries.append(query['sql']['num_from_subqueries'])
-        num_group_by_columns.append(query['sql']['num_group_by_columns'])
-        num_order_by_columns.append(query['sql']['num_order_by_columns'])
+        numOutputColumns.append(query['sql']['num_output_columns'])
+        numFromSubqueries.append(query['sql']['num_from_subqueries'])
+        numGroupByColumns.append(query['sql']['num_group_by_columns'])
+        numOrderByColumns.append(query['sql']['num_order_by_columns'])
 
         if 'limit' in query['sql']:
-            num_limit += 1
+            numLimits += 1
     elif sqlType == 'InsertStmt':
         assert query['sql']['query']['type'] == 'SelectStmt'
-        num_output_columns.append(query['sql']['query']['num_output_columns'])
-        num_from_subqueries.append(query['sql']['query']['num_from_subqueries'])
-        num_group_by_columns.append(query['sql']['query']['num_group_by_columns'])
-        num_order_by_columns.append(query['sql']['query']['num_order_by_columns'])
+        numOutputColumns.append(query['sql']['query']['num_output_columns'])
+        numFromSubqueries.append(query['sql']['query']['num_from_subqueries'])
+        numGroupByColumns.append(query['sql']['query']['num_group_by_columns'])
+        numOrderByColumns.append(query['sql']['query']['num_order_by_columns'])
 
         if 'limit' in query['sql']['query']:
-            num_limit += 1
+            numLimits += 1
     elif sqlType == 'UnionStmt':
-        num_output_columns.append(max(subquery['num_output_columns'] for subquery in query['sql']['queries']))
-        num_from_subqueries.append(sum(subquery['num_from_subqueries'] for subquery in query['sql']['queries']))
-        num_group_by_columns.append(sum(subquery['num_group_by_columns'] for subquery in query['sql']['queries']))
-        num_order_by_columns.append(sum(subquery['num_order_by_columns'] for subquery in query['sql']['queries']))
+        numOutputColumns.append(max(subquery['num_output_columns'] for subquery in query['sql']['queries']))
+        numFromSubqueries.append(sum(subquery['num_from_subqueries'] for subquery in query['sql']['queries']))
+        numGroupByColumns.append(sum(subquery['num_group_by_columns'] for subquery in query['sql']['queries']))
+        numOrderByColumns.append(sum(subquery['num_order_by_columns'] for subquery in query['sql']['queries']))
 
         for subquery in query['sql']['queries']:
             if 'limit' in subquery:
-                num_limit += 1
+                numLimits += 1
                 break
 
-min_num_joins = min(num_joins)
-max_num_joins = max(num_joins)
-avg_num_joins = sum(num_joins) / float(num_queries)
-plots.hist(num_joins, min_num_joins, max_num_joins,
+minNumJoins = min(numJoins)
+maxNumJoins = max(numJoins)
+avgNumJoins = sum(numJoins) / float(len(numJoins))
+plots.hist(numJoins, minNumJoins, maxNumJoins,
         "Number of Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_joins, max_num_joins, avg_num_joins),
+        (minNumJoins, maxNumJoins, avgNumJoins),
         "num_joins_hist.png")
-plots.bar(num_joins, min_num_joins, max_num_joins,
+plots.bar(numJoins, minNumJoins, maxNumJoins,
         "Number of Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_joins, max_num_joins, avg_num_joins),
+        (minNumJoins, maxNumJoins, avgNumJoins),
         "num_joins_bar.png")
 
-min_num_broadcast_joins = min(num_broadcast_joins)
-max_num_broadcast_joins = max(num_broadcast_joins)
-avg_num_broadcast_joins = sum(num_broadcast_joins) / float(num_queries)
-plots.hist(num_broadcast_joins, min_num_broadcast_joins, max_num_broadcast_joins,
+minNumBroadcastJoins = min(numBroadcastJoins)
+maxNumBroadcastJoins = max(numBroadcastJoins)
+avgNumBroadcastJoins = sum(numBroadcastJoins) / float(len(numBroadcastJoins))
+plots.hist(numBroadcastJoins, minNumBroadcastJoins, maxNumBroadcastJoins,
         "Number of Broadcast Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_broadcast_joins, max_num_broadcast_joins, avg_num_broadcast_joins),
+        (minNumBroadcastJoins, maxNumBroadcastJoins, avgNumBroadcastJoins),
         "num_broadcast_joins_hist.png")
-plots.bar(num_broadcast_joins, min_num_broadcast_joins, max_num_broadcast_joins,
+plots.bar(numBroadcastJoins, minNumBroadcastJoins, maxNumBroadcastJoins,
         "Number of Broadcast Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_broadcast_joins, max_num_broadcast_joins, avg_num_broadcast_joins),
+        (minNumBroadcastJoins, maxNumBroadcastJoins, avgNumBroadcastJoins),
         "num_broadcast_joins_bar.png")
 
-min_num_partitioned_joins = min(num_partitioned_joins)
-max_num_partitioned_joins = max(num_partitioned_joins)
-avg_num_partitioned_joins = sum(num_partitioned_joins) / float(num_queries)
-plots.hist(num_partitioned_joins, min_num_partitioned_joins, max_num_partitioned_joins,
+minNumPartitionedJoins = min(numPartitionedJoins)
+maxNumPartitionedJoins = max(numPartitionedJoins)
+avgNumPartitionedJoins = sum(numPartitionedJoins) / float(len(numPartitionedJoins))
+plots.hist(numPartitionedJoins, minNumPartitionedJoins, maxNumPartitionedJoins,
         "Number of Partitioned Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_partitioned_joins, max_num_partitioned_joins, avg_num_partitioned_joins),
+        (minNumPartitionedJoins, maxNumPartitionedJoins, avgNumPartitionedJoins),
         "num_partitioned_joins_hist.png")
-plots.bar(num_partitioned_joins, min_num_partitioned_joins, max_num_partitioned_joins,
+plots.bar(numPartitionedJoins, minNumPartitionedJoins, maxNumPartitionedJoins,
         "Number of Partitioned Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_partitioned_joins, max_num_partitioned_joins, avg_num_partitioned_joins),
+        (minNumPartitionedJoins, maxNumPartitionedJoins, avgNumPartitionedJoins),
         "num_partitioned_joins_bar.png")
 
-min_num_inner_joins = min(num_inner_joins)
-max_num_inner_joins = max(num_inner_joins)
-avg_num_inner_joins = sum(num_inner_joins) / float(num_queries)
-plots.hist(num_inner_joins, min_num_inner_joins, max_num_inner_joins,
+minNumInnerJoins = min(numInnerJoins)
+maxNumInnerJoins = max(numInnerJoins)
+avgNumInnerJoins = sum(numInnerJoins) / float(len(numInnerJoins))
+plots.hist(numInnerJoins, minNumInnerJoins, maxNumInnerJoins,
         "Number of Inner Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_inner_joins, max_num_inner_joins, avg_num_inner_joins),
+        (minNumInnerJoins, maxNumInnerJoins, avgNumInnerJoins),
         "num_inner_joins_hist.png")
-plots.bar(num_inner_joins, min_num_inner_joins, max_num_inner_joins,
+plots.bar(numInnerJoins, minNumInnerJoins, maxNumInnerJoins,
         "Number of Inner Joins", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_inner_joins, max_num_inner_joins, avg_num_inner_joins),
+        (minNumInnerJoins, maxNumInnerJoins, avgNumInnerJoins),
         "num_inner_joins_bar.png")
 
-min_num_tables = min(num_tables)
-max_num_tables = max(num_tables)
-avg_num_tables = sum(num_tables) / float(num_queries)
-plots.hist(num_tables, min_num_tables, max_num_tables,
+minNumTables = min(numTables)
+maxNumTables = max(numTables)
+avgNumTables = sum(numTables) / float(len(numTables))
+plots.hist(numTables, minNumTables, maxNumTables,
         "Number of Tables", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_tables, max_num_tables, avg_num_tables),
+        (minNumTables, maxNumTables, avgNumTables),
         "num_tables_hist.png")
-plots.bar(num_tables, min_num_tables, max_num_tables,
+plots.bar(numTables, minNumTables, maxNumTables,
         "Number of Tables", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_tables, max_num_tables, avg_num_tables),
+        (minNumTables, maxNumTables, avgNumTables),
         "num_tables_bar.png")
 
-min_num_hdfs_scans = min(num_hdfs_scans)
-max_num_hdfs_scans = max(num_hdfs_scans)
-avg_num_hdfs_scans = sum(num_hdfs_scans) / float(num_queries)
-plots.hist(num_hdfs_scans, min_num_hdfs_scans, max_num_hdfs_scans,
+minNumHdfsScans = min(numHdfsScans)
+maxNumHdfsScans = max(numHdfsScans)
+avgNumHdfsScans = sum(numHdfsScans) / float(len(numHdfsScans))
+plots.hist(numHdfsScans, minNumHdfsScans, maxNumHdfsScans,
         "Number of HDFS Scans", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_hdfs_scans, max_num_hdfs_scans, avg_num_hdfs_scans),
+        (minNumHdfsScans, maxNumHdfsScans, avgNumHdfsScans),
         "num_hdfs_scans_hist.png")
-plots.bar(num_hdfs_scans, min_num_hdfs_scans, max_num_hdfs_scans,
+plots.bar(numHdfsScans, minNumHdfsScans, maxNumHdfsScans,
         "Number of HDFS Scans", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_hdfs_scans, max_num_hdfs_scans, avg_num_hdfs_scans),
+        (minNumHdfsScans, maxNumHdfsScans, avgNumHdfsScans),
         "num_hdfs_scans_bar.png")
 
-min_num_output_columns = min(num_output_columns)
-max_num_output_columns = max(num_output_columns)
-avg_num_output_columns = sum(num_output_columns) / float(num_queries)
-plots.hist(num_output_columns, min_num_output_columns, max_num_output_columns,
+minNumOutputColumns = min(numOutputColumns)
+maxNumOutputColumns = max(numOutputColumns)
+avgNumOutputColumns = sum(numOutputColumns) / float(len(numOutputColumns))
+plots.hist(numOutputColumns, minNumOutputColumns, maxNumOutputColumns,
         "Number of Output Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_output_columns, max_num_output_columns, avg_num_output_columns),
+        (minNumOutputColumns, maxNumOutputColumns, avgNumOutputColumns),
         "num_output_columns_hist.png", ylog=True)
-plots.bar(num_output_columns, min_num_output_columns, max_num_output_columns,
+plots.bar(numOutputColumns, minNumOutputColumns, maxNumOutputColumns,
         "Number of Output Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_output_columns, max_num_output_columns, avg_num_output_columns),
+        (minNumOutputColumns, maxNumOutputColumns, avgNumOutputColumns),
         "num_output_columns_bar.png", ylog=True)
 
-min_num_group_by_columns = min(num_group_by_columns)
-max_num_group_by_columns = max(num_group_by_columns)
-avg_num_group_by_columns = sum(num_group_by_columns) / float(num_queries)
-plots.hist(num_group_by_columns, min_num_group_by_columns, max_num_group_by_columns,
+minNumGroupByColumns = min(numGroupByColumns)
+maxNumGroupByColumns = max(numGroupByColumns)
+avgNumGroupByColumns = sum(numGroupByColumns) / float(len(numGroupByColumns))
+plots.hist(numGroupByColumns, minNumGroupByColumns, maxNumGroupByColumns,
         "Number of Group By Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_group_by_columns, max_num_group_by_columns, avg_num_group_by_columns),
+        (minNumGroupByColumns, maxNumGroupByColumns, avgNumGroupByColumns),
         "num_group_by_columns_hist.png")
-plots.bar(num_group_by_columns, min_num_group_by_columns, max_num_group_by_columns,
+plots.bar(numGroupByColumns, minNumGroupByColumns, maxNumGroupByColumns,
         "Number of Group By Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_group_by_columns, max_num_group_by_columns, avg_num_group_by_columns),
+        (minNumGroupByColumns, maxNumGroupByColumns, avgNumGroupByColumns),
         "num_group_by_columns_bar.png")
 
-min_num_order_by_columns = min(num_order_by_columns)
-max_num_order_by_columns = max(num_order_by_columns)
-avg_num_order_by_columns = sum(num_order_by_columns) / float(num_queries)
-plots.hist(num_order_by_columns, min_num_order_by_columns, max_num_order_by_columns,
+minNumOrderByColumns = min(numOrderByColumns)
+maxNumOrderByColumns = max(numOrderByColumns)
+avgNumOrderByColumns = sum(numOrderByColumns) / float(len(numOrderByColumns))
+plots.hist(numOrderByColumns, minNumOrderByColumns, maxNumOrderByColumns,
         "Number of Order By Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_order_by_columns, max_num_order_by_columns, avg_num_order_by_columns),
+        (minNumOrderByColumns, maxNumOrderByColumns, avgNumOrderByColumns),
         "num_order_by_columns_hist.png")
-plots.bar(num_order_by_columns, min_num_order_by_columns, max_num_order_by_columns,
+plots.bar(numOrderByColumns, minNumOrderByColumns, maxNumOrderByColumns,
         "Number of Order By Columns", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_order_by_columns, max_num_order_by_columns, avg_num_order_by_columns),
+        (minNumOrderByColumns, maxNumOrderByColumns, avgNumOrderByColumns),
         "num_order_by_columns_bar.png")
 
-min_hdfs_scan_size = min(hdfs_scan_size)
-max_hdfs_scan_size = max(hdfs_scan_size)
-avg_hdfs_scan_size = sum(hdfs_scan_size) / float(num_queries)
-plots.hist(hdfs_scan_size, min_hdfs_scan_size, max_hdfs_scan_size,
+minHdfsScanSize = min(hdfsScanSize)
+maxHdfsScanSize = max(hdfsScanSize)
+avgHdfsScanSize = sum(hdfsScanSize) / float(len(hdfsScanSize))
+plots.hist(hdfsScanSize, minHdfsScanSize, maxHdfsScanSize,
         "HDFS Scan Size (MB)", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_hdfs_scan_size, max_hdfs_scan_size, avg_hdfs_scan_size),
+        (minHdfsScanSize, maxHdfsScanSize, avgHdfsScanSize),
         "hdfs_scan_size.png")
 
-min_num_from_subqueries = min(num_from_subqueries)
-max_num_from_subqueries = max(num_from_subqueries)
-avg_num_from_subqueries = sum(num_from_subqueries) / float(num_queries)
-plots.hist(num_from_subqueries, min_num_from_subqueries, max_num_from_subqueries,
+minNumFromSubqueries = min(numFromSubqueries)
+maxNumFromSubqueries = max(numFromSubqueries)
+avgNumFromSubqueries = sum(numFromSubqueries) / float(len(numFromSubqueries))
+plots.hist(numFromSubqueries, minNumFromSubqueries, maxNumFromSubqueries,
         "Number of From Subqueries", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_from_subqueries, max_num_from_subqueries, avg_num_from_subqueries),
+        (minNumFromSubqueries, maxNumFromSubqueries, avgNumFromSubqueries),
         "num_from_subqueries_hist.png")
-plots.bar(num_from_subqueries, min_num_from_subqueries, max_num_from_subqueries,
+plots.bar(numFromSubqueries, minNumFromSubqueries, maxNumFromSubqueries,
         "Number of From Subqueries", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_num_from_subqueries, max_num_from_subqueries, avg_num_from_subqueries),
+        (minNumFromSubqueries, maxNumFromSubqueries, avgNumFromSubqueries),
         "num_from_subqueries_bar.png")
 
-min_runtime = min(runtime)
-max_runtime = max(runtime)
-avg_runtime = sum(runtime) / float(num_queries)
-plots.hist(runtime, min_runtime, max_runtime,
+minRuntime = min(runtime)
+maxRuntime = max(runtime)
+avgRuntime = sum(runtime) / float(len(runtime))
+plots.hist(runtime, minRuntime, maxRuntime,
         "Runtime (s)", "Number of Queries",
         "$min = %s$ $max = %s$ $avg = %s$" %
-        (min_runtime, max_runtime, avg_runtime),
+        (minRuntime, maxRuntime, avgRuntime),
         "runtime.png", ylog=True)
 
-avg_time_pct = {name: (pct / num_queries) for name, pct in sum_time_pct.items()}
-plots.pie(avg_time_pct.values(), avg_time_pct.keys(), "Avg of Operator Time Percent", "avg_time_pct_pie.png")
+for name in timePctPerOperator.iterkeys():
+    # if an operator doesn't exist in a query, its pct is 0
+    timePctPerOperator[name].extend([0.0] * (numQueries - len(timePctPerOperator[name])))
 
-sum_time = float(sum(sum_time_abs.itervalues()))
-abs_time_pct = {name: (time / sum_time) for name, time in sum_time_abs.items()}
-plots.pie(abs_time_pct.values(), abs_time_pct.keys(), 'Operator Time Percent', 'abs_time_pct_pie.png')
+for name in sumTimePerOperator.iterkeys():
+    # if an operator doesn't exist in a query, its time is 0
+    sumTimePerOperator[name].extend([0] * (numQueries - len(sumTimePerOperator[name])))
 
-sum_time_abs = sum_time_abs.items()
-sum_time_abs.sort(key=lambda operator: operator[1], reverse=True)
-plots.stacked_bar([operator[1] / 1000000 for operator in sum_time_abs],
-        'Time', ['%s %sms' % (operator[0], operator[1] / 1000000) for operator in sum_time_abs],
+avgTimePctPerOperator = {name: (sum(pcts) / len(pcts)) for name, pcts in timePctPerOperator.items()}
+plots.pie(
+    avgTimePctPerOperator.values(), avgTimePctPerOperator.keys(),
+    "Avg of Operator Time Percent", "avg_time_pct_pie.png")
+
+sumTimePerOperator = {name: sum(sumTimes) for name, sumTimes in sumTimePerOperator.items()}
+sumTimeAllOperators = float(sum(sumTimePerOperator.itervalues()))
+absTimePctPerOperator = {name: (time / sumTimeAllOperators) for name, time in sumTimePerOperator.items()}
+plots.pie(
+    absTimePctPerOperator.values(), absTimePctPerOperator.keys(),
+    'Operator Time Percent', 'abs_time_pct_pie.png')
+
+sumTimePerOperator = sumTimePerOperator.items()
+sumTimePerOperator.sort(key=lambda operator: operator[1], reverse=True)
+plots.stacked_bar([operator[1] / 1000000 for operator in sumTimePerOperator],
+        'Time', ['%s %sms' % (operator[0], operator[1] / 1000000) for operator in sumTimePerOperator],
         'Operator Sum Time (ms)',
         'stacked_time.png')
 
-print 'limit_pct %s%%' % (num_limit / float(num_queries) * 100)
+print 'limit_pct %s%%' % (numLimits / float(numQueries) * 100)
 
 clusters = db.queries.find({'tag': tag}).distinct('cluster')
 for cluster in clusters:
@@ -354,20 +363,21 @@ for cluster in clusters:
         times.append((query['start_time'], 1))
         times.append((query['end_time'], -1))
     times.sort()
-    max_num_concurrent_queries = 1
-    cur_num_concurrent_queries = 1
-    sum_num_query_microseconds = 0
-    sum_num_concurrent_queries = 0
+    maxNumConcurrentQueries = 1
+    currNumConcurrentQueries = 1
+    sumQueryMicroseconds = 0
+    sumNumConcurrentQueries = 0
     for i in xrange(1, len(times)):
         interval = times[i][0] - times[i-1][0]
-        if cur_num_concurrent_queries > 0:
-            sum_num_query_microseconds += interval
-            sum_num_concurrent_queries += interval * cur_num_concurrent_queries
-        cur_num_concurrent_queries += times[i][1]
-        max_num_concurrent_queries = max(max_num_concurrent_queries, cur_num_concurrent_queries)
-    avg_num_concurrent_queries = float(sum_num_concurrent_queries) / sum_num_query_microseconds
-    print max_num_concurrent_queries
-    print avg_num_concurrent_queries
+        if currNumConcurrentQueries > 0:
+            sumQueryMicroseconds += interval
+            sumNumConcurrentQueries += interval * currNumConcurrentQueries
+        currNumConcurrentQueries += times[i][1]
+        maxNumConcurrentQueries = max(maxNumConcurrentQueries, currNumConcurrentQueries)
+    # average number of concurrent queries in one microsecond
+    avgNumConcurrentQueries = float(sumNumConcurrentQueries) / sumQueryMicroseconds
+    print maxNumConcurrentQueries
+    print avgNumConcurrentQueries
 
 queries = db.queries.aggregate([
     {'$match': {'tag': tag}},

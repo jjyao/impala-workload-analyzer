@@ -19,7 +19,7 @@ def isWrongJoinImpl(operator, leftChild, rightChild):
             return True
     return False
 
-def isWrongJoinOrder(operator, leftChild, rightChild):
+def isWrongJoinLeftRight(operator, leftChild, rightChild):
     if operator['join_impl'] != 'BROADCAST':
         return False
 
@@ -34,11 +34,11 @@ plots.outputDir = sys.argv[2]
 
 numCorrectJoins = 0
 numWrongJoinImpls = 0
-numWrongJoinOrders = 0
+numWrongJoinLeftRights = 0
 
 timeCorrectJoins = 0
 timeWrongJoinImpls = 0
-timeWrongJoinOrders = 0
+timeWrongJoinLeftRights = 0
 
 queries = db.queries.find({'tag': sys.argv[1]})
 for query in queries:
@@ -60,9 +60,9 @@ for query in queries:
         if isWrongJoinImpl(operator, leftChild, rightChild):
             numWrongJoinImpls += 1
             timeWrongJoinImpls += operator['avg_time']
-        elif isWrongJoinOrder(operator, leftChild, rightChild):
-            numWrongJoinOrders += 1
-            timeWrongJoinOrders += operator['avg_time']
+        elif isWrongJoinLeftRight(operator, leftChild, rightChild):
+            numWrongJoinLeftRights += 1
+            timeWrongJoinLeftRights += operator['avg_time']
         else:
             numCorrectJoins += 1
             timeCorrectJoins += operator['avg_time']
@@ -71,13 +71,13 @@ plots.stacked_bar(
     [
         numCorrectJoins,
         numWrongJoinImpls,
-        numWrongJoinOrders,
+        numWrongJoinLeftRights,
     ],
     'Number of Joins',
     [
         'Correct Join %s' % numCorrectJoins,
         'Wrong Join Impl %s' % numWrongJoinImpls,
-        'Wrong Join Order %s' % numWrongJoinOrders,
+        'Wrong Join Left Right %s' % numWrongJoinLeftRights,
     ],
     'Join Correctness',
     'stacked_num_join_correctness.png'
@@ -87,13 +87,13 @@ plots.stacked_bar(
     [
         timeCorrectJoins / 1000000,
         timeWrongJoinImpls / 1000000,
-        timeWrongJoinOrders / 1000000,
+        timeWrongJoinLeftRights / 1000000,
     ],
     'Time of Joins',
     [
         'Correct Join %sms' % (timeCorrectJoins / 1000000),
         'Wrong Join Impl %sms' % (timeWrongJoinImpls / 1000000),
-        'Wrong Join Order %sms' % (timeWrongJoinOrders / 1000000),
+        'Wrong Join Left Right %sms' % (timeWrongJoinLeftRights / 1000000),
     ],
     'Join Correctness',
     'stacked_time_join_correctness.png'
