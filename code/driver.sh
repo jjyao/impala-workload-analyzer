@@ -6,6 +6,7 @@ for file in $(find $2 -not -path '*/\.*' -type f); do
     cd python; python analyze_profiles.py $1 $file; cd ..
 done
 
+cd java; ant; cd ..
 java -jar java/out/artifacts/query_analyzer/query_analyzer.jar $1
 
 mkdir -p $3

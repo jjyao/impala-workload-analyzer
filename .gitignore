@@ -1,5 +1,5 @@
 .idea/
 gen-py/
 mongodb/
-out/production
+out
 *.pyc
