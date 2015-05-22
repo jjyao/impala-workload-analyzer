@@ -325,6 +325,11 @@ plots.hist(runtime, minRuntime, maxRuntime,
         "$min = %s$ $max = %s$ $avg = %s$" %
         (minRuntime, maxRuntime, avgRuntime),
         "runtime.png", ylog=True)
+plots.scatter([time for time in runtime if time > 0],
+        "Queries", "Runtime (s)",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (minRuntime, maxRuntime, avgRuntime),
+        "runtime_scatter.png")
 
 for name in timePctPerOperator.iterkeys():
     # if an operator doesn't exist in a query, its pct is 0
@@ -344,14 +349,14 @@ sumTimeAllOperators = float(sum(sumTimePerOperator.itervalues()))
 absTimePctPerOperator = {name: (time / sumTimeAllOperators) for name, time in sumTimePerOperator.items()}
 plots.pie(
     absTimePctPerOperator.values(), absTimePctPerOperator.keys(),
-    'Operator Time Percent', 'abs_time_pct_pie.png')
+    "Operator Time Percent", "abs_time_pct_pie.png")
 
 sumTimePerOperator = sumTimePerOperator.items()
 sumTimePerOperator.sort(key=lambda operator: operator[1], reverse=True)
 plots.stacked_bar([operator[1] / 1000000 for operator in sumTimePerOperator],
-        'Time', ['%s %sms' % (operator[0], operator[1] / 1000000) for operator in sumTimePerOperator],
-        'Operator Sum Time (ms)',
-        'stacked_time.png')
+        "Time", ['%s %sms' % (operator[0], operator[1] / 1000000) for operator in sumTimePerOperator],
+        "Operator Sum Time (ms)",
+        "stacked_time.png")
 
 print 'limit_pct %s%%' % (numLimits / float(numQueries) * 100)
 
@@ -385,10 +390,10 @@ queries = db.queries.aggregate([
 ])['result']
 queries.sort(key=lambda query: query['count'], reverse=True)
 plots.stacked_bar([query['count'] for query in queries],
-        'Count', ['%s %s' % (query['_id'], query['count']) for query in queries],
-        '#Query',
-        'stacked_query_count.png')
+        "Count", ['%s %s' % (query['_id'], query['count']) for query in queries],
+        "#Query",
+        "stacked_query_count.png")
 plots.stacked_bar([query['runtime'] / 1000000 for query in queries],
-        'Time', ['%s %sms' % (query['_id'], query['runtime'] / 1000000) for query in queries],
-        'Query Sum Time (ms)',
-        'stacked_query_time.png')
+        "Time", ['%s %sms' % (query['_id'], query['runtime'] / 1000000) for query in queries],
+        "Query Sum Time (ms)",
+        "stacked_query_time.png")

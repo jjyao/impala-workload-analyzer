@@ -4,6 +4,19 @@ from matplotlib import pyplot
 
 outputDir = None
 
+def scatter(data, xlabel, ylabel, title, output):
+    global outputDir
+
+    pyplot.clf()
+    pyplot.scatter(range(0, len(data)), data)
+    pyplot.xlim(0)
+    pyplot.ylim(0)
+    pyplot.xlabel(xlabel)
+    pyplot.ylabel(ylabel)
+    pyplot.title(title)
+    pyplot.tight_layout()
+    pyplot.savefig('%s/%s' % (outputDir, output))
+
 def hist(data, minval, maxval, xlabel, ylabel, title, output, **kwargs):
     global outputDir
     ylog = kwargs.get('ylog', False)
