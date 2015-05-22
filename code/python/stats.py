@@ -353,14 +353,14 @@ for name in sumTimePerOperator.iterkeys():
     # if an operator doesn't exist in a query, its time is 0
     sumTimePerOperator[name].extend([0] * (numQueries - len(sumTimePerOperator[name])))
 
-avgTimePctPerOperator = {name: (sum(pcts) / len(pcts)) for name, pcts in timePctPerOperator.items()}
+avgTimePctPerOperator = dict((name, (sum(pcts) / len(pcts))) for (name, pcts) in timePctPerOperator.items())
 plots.pie(
     avgTimePctPerOperator.values(), avgTimePctPerOperator.keys(),
     "Avg of Operator Time Percent", "avg_time_pct_pie.png")
 
-sumTimePerOperator = {name: sum(sumTimes) for name, sumTimes in sumTimePerOperator.items()}
+sumTimePerOperator = dict((name, sum(sumTimes)) for (name, sumTimes) in sumTimePerOperator.items())
 sumTimeAllOperators = float(sum(sumTimePerOperator.itervalues()))
-absTimePctPerOperator = {name: (time / sumTimeAllOperators) for name, time in sumTimePerOperator.items()}
+absTimePctPerOperator = dict((name, (time / sumTimeAllOperators)) for (name, time) in sumTimePerOperator.items())
 plots.pie(
     absTimePctPerOperator.values(), absTimePctPerOperator.keys(),
     "Operator Time Percent", "abs_time_pct_pie.png")
