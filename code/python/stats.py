@@ -1,10 +1,13 @@
 import sys
+import numpy
 import plots
 import pymongo
+from matplotlib import pyplot
 
 db = pymongo.MongoClient().impala
 tag = sys.argv[1]
-plots.outputDir = sys.argv[2]
+outputDir = sys.argv[2]
+plots.outputDir = outputDir
 
 queries = db.queries.find({
     'tag': tag,
@@ -31,13 +34,19 @@ for query in queries:
     operators = list(db.operators.find({'query_id': query['_id']}))
     for operator in operators:
         operator['diff_time'] = operator['max_time'] - operator['avg_time']
-    operators.sort(key=lambda operator: operator['diff_time'], reverse=True)
-    plots.stacked_bar(
-        [operator['diff_time'] / 1000000 for operator in operators],
-        'Time Diff',
-        ['%s:%s %sms' % (operator['id'], operator['name'], operator['diff_time'] / 1000000) for operator in operators],
-        'Operator Time Diff (ms)',
-        '%s_stacked_time_diff.png' % query['_id'])
+        operator['diff_time_pct'] = operator['diff_time'] / float(query['runtime'])
+    operators = [operator for operator in operators if operator['diff_time_pct'] >= 0.01]
+    operators.sort(key=lambda operator: operator['diff_time_pct'], reverse=True)
+    pyplot.clf()
+    left = numpy.arange(len(operators))
+    height = [operator['diff_time_pct'] for operator in operators]
+    pyplot.bar(left, height, align = 'center')
+    pyplot.xlabel('Query')
+    pyplot.ylabel('Diff Time Pct')
+    pyplot.xticks(left, [operator['name'] for operator in operators], rotation='vertical')
+    pyplot.title('Diff Time Pct')
+    pyplot.tight_layout()
+    pyplot.savefig('%s/%s_diff_time_pct.png' % (outputDir, query['_id']))
 
     operators = db.operators.aggregate([
         {'$match': {'query_id': query['_id']}},
@@ -325,8 +334,8 @@ plots.hist(runtime, minRuntime, maxRuntime,
         "$min = %s$ $max = %s$ $avg = %s$" %
         (minRuntime, maxRuntime, avgRuntime),
         "runtime.png", ylog=True)
-plots.scatter([time for time in runtime if time > 0],
-        "Queries", "Runtime (s)",
+plots.scatter(runtime,
+        "Query", "Runtime (s)",
         "$min = %s$ $max = %s$ $avg = %s$" %
         (minRuntime, maxRuntime, avgRuntime),
         "runtime_scatter.png")
