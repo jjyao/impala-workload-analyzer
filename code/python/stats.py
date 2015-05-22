@@ -41,7 +41,7 @@ for query in queries:
     left = numpy.arange(len(operators))
     height = [operator['diff_time_pct'] for operator in operators]
     pyplot.bar(left, height, align = 'center')
-    pyplot.xlabel('Query')
+    pyplot.xlabel('Operator')
     pyplot.ylabel('Diff Time Pct')
     pyplot.xticks(left, [operator['name'] for operator in operators], rotation='vertical')
     pyplot.title('Diff Time Pct')
