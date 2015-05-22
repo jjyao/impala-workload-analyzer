@@ -339,6 +339,11 @@ plots.scatter(runtime,
         "$min = %s$ $max = %s$ $avg = %s$" %
         (minRuntime, maxRuntime, avgRuntime),
         "runtime_scatter.png")
+plots.scatter(runtime,
+        "Query", "Runtime (s)",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (minRuntime, maxRuntime, avgRuntime),
+        "runtime_scatter_ylog.png", ylog=True)
 
 for name in timePctPerOperator.iterkeys():
     # if an operator doesn't exist in a query, its pct is 0
