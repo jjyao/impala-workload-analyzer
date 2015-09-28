@@ -24,6 +24,7 @@ Impala Workload Analyzer
             |— aggs.py: check the quality of pre aggs
             |— plots.py: helper file to draw graphs
             |— delete_queries_with_tag.py: delete queries with a particular tag
+            |— clustering.py: group queries into clusters
 
 ## RUN ON vd0204.halxg.cloudera.com
     1. Make sure mongodb is running

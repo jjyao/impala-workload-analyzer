@@ -23,7 +23,7 @@ numFromSubqueries = []
 numOutputColumns = []
 numGroupByColumns = []
 numOrderByColumns = []
-numLimits = 0
+numLimits = []
 numQueries = queries.count()
 hdfsScanSize = []
 runtime = []
@@ -149,33 +149,19 @@ for query in queries:
     runtime.append(query['runtime'] / 1000000000)
 
     sqlType = query['sql']['type']
-    if sqlType == 'SelectStmt':
+    if sqlType in ['SelectStmt', 'UnionStmt']:
         numOutputColumns.append(query['sql']['num_output_columns'])
         numFromSubqueries.append(query['sql']['num_from_subqueries'])
         numGroupByColumns.append(query['sql']['num_group_by_columns'])
         numOrderByColumns.append(query['sql']['num_order_by_columns'])
-
-        if 'limit' in query['sql']:
-            numLimits += 1
+        numLimits.append(query['sql']['num_limits'])
     elif sqlType == 'InsertStmt':
-        assert query['sql']['query']['type'] == 'SelectStmt'
+        assert query['sql']['query']['type'] in ['SelectStmt', 'UnionStmt']
         numOutputColumns.append(query['sql']['query']['num_output_columns'])
         numFromSubqueries.append(query['sql']['query']['num_from_subqueries'])
         numGroupByColumns.append(query['sql']['query']['num_group_by_columns'])
         numOrderByColumns.append(query['sql']['query']['num_order_by_columns'])
-
-        if 'limit' in query['sql']['query']:
-            numLimits += 1
-    elif sqlType == 'UnionStmt':
-        numOutputColumns.append(max(subquery['num_output_columns'] for subquery in query['sql']['queries']))
-        numFromSubqueries.append(sum(subquery['num_from_subqueries'] for subquery in query['sql']['queries']))
-        numGroupByColumns.append(sum(subquery['num_group_by_columns'] for subquery in query['sql']['queries']))
-        numOrderByColumns.append(sum(subquery['num_order_by_columns'] for subquery in query['sql']['queries']))
-
-        for subquery in query['sql']['queries']:
-            if 'limit' in subquery:
-                numLimits += 1
-                break
+        numLimits.append(query['sql']['query']['num_limits'])
 
 minNumJoins = min(numJoins)
 maxNumJoins = max(numJoins)
@@ -326,6 +312,20 @@ plots.bar(numFromSubqueries, minNumFromSubqueries, maxNumFromSubqueries,
         (minNumFromSubqueries, maxNumFromSubqueries, avgNumFromSubqueries),
         "num_from_subqueries_bar.png")
 
+minNumLimits = min(numLimits)
+maxNumLimits = max(numLimits)
+avgNumLimits = sum(numLimits) / float(len(numLimits))
+plots.hist(numLimits, minNumLimits, maxNumLimits,
+        "Number of Limits", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (minNumLimits, maxNumLimits, avgNumLimits),
+        "num_limits_hist.png")
+plots.bar(numLimits, minNumLimits, maxNumLimits,
+        "Number of Limits", "Number of Queries",
+        "$min = %s$ $max = %s$ $avg = %s$" %
+        (minNumLimits, maxNumLimits, avgNumLimits),
+        "num_limits_bar.png")
+
 minRuntime = min(runtime)
 maxRuntime = max(runtime)
 avgRuntime = sum(runtime) / float(len(runtime))
@@ -371,8 +371,6 @@ plots.stacked_bar([operator[1] / 1000000 for operator in sumTimePerOperator],
         "Time", ['%s %sms' % (operator[0], operator[1] / 1000000) for operator in sumTimePerOperator],
         "Operator Sum Time (ms)",
         "stacked_time.png")
-
-print 'limit_pct %s%%' % (numLimits / float(numQueries) * 100)
 
 clusters = db.queries.find({'tag': tag}).distinct('cluster')
 for cluster in clusters:

@@ -2,6 +2,7 @@ import sys
 import numpy
 import pymongo
 from matplotlib import pyplot
+from scipy.spatial import distance
 from sklearn import cluster
 from sklearn import decomposition
 from sklearn import preprocessing
@@ -9,130 +10,61 @@ from sklearn import preprocessing
 db = pymongo.MongoClient().impala
 
 queries = db.queries.find({
-    'sql.type': {'$in': ['SelectStmt', 'InsertStmt', 'UnionStmt']}})
+    'tag': sys.argv[1],
+    'sql.type': {'$in': ['SelectStmt', 'UnionStmt']}})
 
 samples = []
 
 for query in queries:
-    print query['_id']
     sample = []
-    sample.append(query['plan_time'] / 1000000)
-    sample.append(query['fragment_start_time'] / 1000000)
-    sample.append(query['runtime'] / 1000000000)
 
-    codeGenTime = db.fragments.aggregate([
-        {'$match': {'query_id': query['_id']}},
-        {'$group': {'_id': None, 'sum_time': {'$sum': '$avg_code_gen.TotalTime'}}},
-    ])['result'][0]['sum_time']
-    sample.append(codeGenTime / 1000000)
-
-    hdfsTableSinkTime = db.fragments.aggregate([
-        {'$match': {'query_id': query['_id']}},
-        {'$group': {'_id': None, 'sum_time': {'$sum': '$avg_hdfs_table_sink.TotalTime'}}},
-    ])['result'][0]['sum_time']
-    sample.append(hdfsTableSinkTime / 1000000000)
-
-    operators = db.operators.aggregate([
-        {'$match': {'query_id': query['_id']}},
-        {'$group': {'_id': '$name', 'sum_time': {'$sum': '$avg_time'}}},
-    ])['result']
-
-    sumTimeAllOperators = float(sum(operator['sum_time'] for operator in operators)) + \
-            query['plan_time'] + query['fragment_start_time'] + \
-            codeGenTime + hdfsTableSinkTime
-    sample.append(sumTimeAllOperators / 1000000000)
-
-    numJoins = db.operators.find({
-        'query_id': query['_id'],
-        'name': {'$in': ['HASH JOIN', 'CROSS JOIN']}
-    }).count()
-    sample.append(numJoins)
-
-    numBroadcastJoins = db.operators.find({
-        'query_id': query['_id'],
-        'name': {'$in': ['HASH JOIN', 'CROSS JOIN']},
-        'join_impl': 'BROADCAST'
-    }).count()
-    sample.append(numBroadcastJoins)
-
-    numPartitionedJoins = db.operators.find({
-        'query_id': query['_id'],
-        'name': {'$in': ['HASH JOIN', 'CROSS JOIN']},
-        'join_impl': 'PARTITIONED'
-    }).count()
-    sample.append(numPartitionedJoins)
-
-    numInnerJoins = db.operators.find({
-        'query_id': query['_id'],
-        'name': 'HASH JOIN',
-        'join_type': 'INNER JOIN'
-    }).count()
-    sample.append(numInnerJoins)
-
-    scanHdfs = db.operators.aggregate([
-                {'$match': {'query_id': query['_id'], 'name': 'SCAN HDFS'}},
-                {'$group': {'_id': None, 'size': {'$sum': '$size'}}},
-            ])['result']
-    if scanHdfs:
-        sample.append(scanHdfs[0]['size'] / 1024 / 1024)
-    else:
-        sample.append(0)
-
-    sample.append(query['num_hdfs_scans'])
     sample.append(query['num_tables'])
+    sample.append(
+            query['sql']['num_from_subqueries'] +
+            query['sql']['num_where_subqueries'] +
+            query['sql']['num_with_subqueries'])
+    sample.append(query['sql']['max_depth_subqueries'])
+    sample.append(query['sql']['num_group_by_columns'])
+    sample.append(query['sql']['num_order_by_columns'])
+    sample.append(query['sql']['num_limits'])
+    sample.append(
+            query['sql']['num_where_in_predicates'] + 
+            query['sql']['num_where_between_predicates'] +
+            query['sql']['num_where_exists_predicates'] +
+            query['sql']['num_where_is_null_predicates'] +
+            sum(query['sql']['num_where_binary_predicates'].values()) +
+            sum(query['sql']['num_where_like_predicates'].values()))
+    sample.append(query['sql']['num_where_function_call'])
+    sample.append(query['sql']['num_where_case'])
 
-    sqlType = query['sql']['type']
-    if sqlType == 'SelectStmt':
-        sample.append(query['sql']['num_output_columns'])
-        sample.append(query['sql']['num_from_subqueries'])
-        sample.append(query['sql']['num_group_by_columns'])
-        sample.append(query['sql']['num_order_by_columns'])
-
-        if 'limit' in query['sql']:
-            sample.append(query['sql']['limit'])
-        else:
-            sample.append(sys.maxint)
-    elif sqlType == 'InsertStmt':
-        assert query['sql']['query']['type'] == 'SelectStmt'
-        sample.append(query['sql']['query']['num_output_columns'])
-        sample.append(query['sql']['query']['num_from_subqueries'])
-        sample.append(query['sql']['query']['num_group_by_columns'])
-        sample.append(query['sql']['query']['num_order_by_columns'])
-
-        if 'limit' in query['sql']['query']:
-            sample.append(query['sql']['query']['limit'])
-        else:
-            sample.append(sys.maxint)
-    elif sqlType == 'UnionStmt':
-        sample.append(max(subquery['num_output_columns'] for subquery in query['sql']['queries']))
-        sample.append(sum(subquery['num_from_subqueries'] for subquery in query['sql']['queries']))
-        sample.append(sum(subquery['num_group_by_columns'] for subquery in query['sql']['queries']))
-        sample.append(sum(subquery['num_order_by_columns'] for subquery in query['sql']['queries']))
-
-        limits = []
-        for subquery in query['sql']['queries']:
-            if 'limit' in subquery:
-                limits.append(subquery['limit'])
-        if limits:
-            sample.append(sum(limits))
-        else:
-            sample.append(sys.maxint)
-
-    sample = sample[:-1]
     samples.append(sample)
 
 samples = numpy.array(samples)
 
-pca = decomposition.PCA(n_components=2)
-pcaSamples = pca.fit(samples).transform(samples)
-standardSamples = preprocessing.StandardScaler().fit_transform(pcaSamples)
-print samples
-print pcaSamples
-print standardSamples
-pyplot.clf()
-pyplot.scatter(standardSamples[:, 0], standardSamples[:, 1])
-pyplot.tight_layout()
-pyplot.savefig('clustering.png')
+standardSamples = preprocessing.StandardScaler().fit_transform(samples)
 
-clusters = cluster.DBSCAN(eps=0.2, min_samples=2).fit(standardSamples)
-print clusters.labels_
+K = range(1, 70)
+estimators = [cluster.KMeans(n_clusters=k).fit(standardSamples) for k in K]
+centers = [estimator.cluster_centers_ for estimator in estimators]
+euclideans = [distance.cdist(standardSamples, center, 'euclidean') for center in centers]
+dist = [numpy.min(euclidean, axis=1) for euclidean in euclideans]
+wcss = [sum(d**2) for d in dist]
+tss = sum(distance.pdist(standardSamples)**2) / standardSamples.shape[0]
+bss = tss - wcss
+pyplot.clf()
+pyplot.plot(K, bss / tss * 100, 'b*-')
+pyplot.grid(True)
+pyplot.xlabel('Number of clusters')
+pyplot.ylabel('Percentage of variance explained')
+pyplot.title('Elbow for KMeans clustering')
+pyplot.savefig('kmeans.png')
+
+K = 10
+estimator = cluster.KMeans(n_clusters=K).fit(standardSamples)
+labels = estimator.labels_
+clusters = [[] for i in xrange(0, K)]
+for i in xrange(0, len(labels)):
+    clusters[labels[i]].append(samples[i])
+
+for i in xrange(0, K):
+    print sum(clusters[i]) / len(clusters[i])

@@ -1,85 +1,208 @@
 package com.cloudera.impala.analysis;
 
+import com.cloudera.impala.catalog.View;
+import com.cloudera.impala.util.Visitor;
 import com.mongodb.*;
+import org.apache.commons.lang.reflect.FieldUtils;
 
 import java.io.StringReader;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class QueryAnalyzer {
-    public static Map<String, Object> analyzeQuery(Object stmt) {
-        Map<String, Object> analyzedQuery = new HashMap<String, Object>();
+    public static Map<String, Object> analyzeStmt(Object stmt) {
+        Map<String, Object> analyzedStmt = new HashMap<String, Object>();
 
-        analyzedQuery.put("type", stmt.getClass().getSimpleName());
+        analyzedStmt.put("type", stmt.getClass().getSimpleName());
 
-        return analyzedQuery;
+        return analyzedStmt;
     }
 
-    public static Map<String, Object> analyzeInsertQuery(InsertStmt stmt) {
-        Map<String, Object> analyzedQuery = new HashMap<String, Object>();
+    public static Map<String, Object> analyzeInsertStmt(InsertStmt stmt) throws Exception {
+        Map<String, Object> analyzedStmt = new HashMap<String, Object>();
 
-        analyzedQuery.put("type", stmt.getClass().getSimpleName());
+        analyzedStmt.put("type", stmt.getClass().getSimpleName());
 
-        analyzedQuery.put("overwrite", stmt.isOverwrite());
+        analyzedStmt.put("overwrite", stmt.isOverwrite());
 
-        if (stmt.getQueryStmt() instanceof SelectStmt) {
-            analyzedQuery.put("query", analyzeSelectQuery((SelectStmt) stmt.getQueryStmt()));
+        analyzedStmt.put("query", analyzeQueryStmt(stmt.getQueryStmt()));
+
+        return analyzedStmt;
+    }
+
+    public static QueryStats getQueryStats(QueryStmt stmt) {
+        if (stmt instanceof SelectStmt) {
+            return getSelectQueryStats((SelectStmt) stmt);
+        } else {
+            return getUnionQueryStats((UnionStmt) stmt);
         }
-
-        return analyzedQuery;
     }
 
-    public static Map<String, Object> analyzeUnionQuery(UnionStmt stmt) {
-        Map<String, Object> analyzedQuery = new HashMap<String, Object>();
+    @SuppressWarnings("unchecked")
+    public static QueryStats getUnionQueryStats(UnionStmt stmt) {
+        final QueryStats queryStats = new QueryStats();
 
-        analyzedQuery.put("type", stmt.getClass().getSimpleName());
-
-        List<Map<String, Object>> analyzedQueries = new ArrayList<Map<String, Object>>();
-        for (UnionStmt.UnionOperand operand: stmt.getOperands()) {
-            if (operand.getQueryStmt() instanceof SelectStmt) {
-                analyzedQueries.add(analyzeSelectQuery((SelectStmt) operand.getQueryStmt()));
+        if (stmt.hasWithClause()) {
+            try {
+                List<View> views = (List<View>) FieldUtils.readField(stmt.getWithClause(), "views_", true);
+                for (View view : views) {
+                    queryStats.numWithSubqueries++;
+                    queryStats.merge(getQueryStats(view.getQueryStmt()));
+                }
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
             }
         }
-        analyzedQuery.put("queries", analyzedQueries);
 
-        return analyzedQuery;
-    }
-
-    public static Map<String, Object> analyzeSelectQuery(SelectStmt stmt) {
-        Map<String, Object> analyzedQuery = new HashMap<String, Object>();
-
-        analyzedQuery.put("type", stmt.getClass().getSimpleName());
-
-        SelectList selectList = stmt.getSelectList();
-        analyzedQuery.put("num_output_columns", selectList.getItems().size());
-
-        int num_from_subqueries = 0;
-        for (TableRef tableRef : stmt.getTableRefs()) {
-            if (tableRef instanceof InlineViewRef) {
-                num_from_subqueries++;
-            }
-        }
-        analyzedQuery.put("num_from_subqueries", num_from_subqueries);
-
-        if (stmt.hasGroupByClause()) {
-            analyzedQuery.put("num_group_by_columns", stmt.groupingExprs_.size());
-        } else {
-            analyzedQuery.put("num_group_by_columns", 0);
-        }
-
-        if (stmt.hasOrderByClause()) {
-            analyzedQuery.put("num_order_by_columns", stmt.orderByElements_.size());
-        } else {
-            analyzedQuery.put("num_order_by_columns", 0);
+        if (stmt.hasOrderByClause())  {
+            queryStats.numOrderByColumns += stmt.orderByElements_.size();
         }
 
         if (stmt.hasLimit()) {
-            analyzedQuery.put("limit", ((NumericLiteral) stmt.limitElement_.getLimitExpr()).getIntValue());
+            queryStats.numLimits++;
         }
 
-        return analyzedQuery;
+        for (UnionStmt.UnionOperand operand: stmt.getOperands()) {
+            QueryStats operandQueryStats = getQueryStats(operand.getQueryStmt());
+            queryStats.numOutputColumns = operandQueryStats.numOutputColumns;
+            queryStats.merge(operandQueryStats);
+        }
+
+        return queryStats;
+    }
+
+    @SuppressWarnings("unchecked")
+    public static QueryStats getSelectQueryStats(SelectStmt stmt) {
+        final QueryStats queryStats = new QueryStats();
+
+        if (stmt.hasWithClause()) {
+            try {
+                List<View> views = (List<View>) FieldUtils.readField(stmt.getWithClause(), "views_", true);
+                for (View view : views) {
+                    queryStats.numWithSubqueries++;
+                    queryStats.merge(getQueryStats(view.getQueryStmt()));
+                }
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            }
+        }
+
+        SelectList selectList = stmt.getSelectList();
+        for (SelectListItem selectListItem : selectList.getItems()) {
+            if (selectListItem.isStar()) {
+                queryStats.numOutputColumns = -1;
+                break;
+            } else {
+                queryStats.numOutputColumns++;
+            }
+        }
+
+        if (stmt.hasWhereClause()) {
+            stmt.getWhereClause().accept(new Visitor<Expr>() {
+                @SuppressWarnings("unchecked")
+                @Override
+                public void visit(Expr expr) {
+                    if (expr instanceof CompoundPredicate) {
+                        CompoundPredicate compoundPredicate = (CompoundPredicate) expr;
+                        queryStats.incCounter(queryStats.numWhereCompoundPredicates,
+                                compoundPredicate.getOp().toString());
+                    } else if (expr instanceof BinaryPredicate) {
+                        BinaryPredicate binaryPredicate = (BinaryPredicate) expr;
+                        queryStats.incCounter(queryStats.numWhereBinaryPredicates,
+                                binaryPredicate.getOp().getName());
+                    } else if (expr instanceof LikePredicate) {
+                        try {
+                            LikePredicate likePredicate = (LikePredicate) expr;
+                            queryStats.incCounter(queryStats.numWhereLikePredicates,
+                                    FieldUtils.readField(likePredicate, "op_", true).toString());
+                        } catch (IllegalAccessException e) {
+                            e.printStackTrace();
+                        }
+                    } else if (expr instanceof InPredicate) {
+                        queryStats.numWhereInPredicates++;
+                    } else if (expr instanceof BetweenPredicate) {
+                        BetweenPredicate betweenPredicate = (BetweenPredicate) expr;
+                        queryStats.numWhereBetweenPredicates++;
+
+                        // Children of BetweenPredicate are not populated until it's analyzed
+                        // As we don't analyze BetweenPredicate, we have to populate its children manually
+                        try {
+                            betweenPredicate.addChildren(
+                                    (List<Expr>) FieldUtils.readField(
+                                            betweenPredicate, "originalChildren_", true));
+                        } catch (IllegalAccessException e) {
+                            e.printStackTrace();
+                        }
+                    } else if (expr instanceof ExistsPredicate) {
+                        queryStats.numWhereExistsPredicates++;
+                    } else if (expr instanceof IsNullPredicate) {
+                        queryStats.numWhereIsNullPredicates++;
+                    } else if (expr instanceof FunctionCallExpr) {
+                        queryStats.numWhereFunctionCall++;
+                    } else if (expr instanceof CaseExpr) {
+                        queryStats.numWhereCase++;
+                    } else if (expr instanceof Subquery) {
+                        Subquery subquery = (Subquery) expr;
+                        queryStats.numWhereSubqueries++;
+                        queryStats.merge(getQueryStats(subquery.getStatement()));
+                    }
+                }
+            });
+        }
+
+        if (stmt.hasGroupByClause()) {
+            queryStats.numGroupByColumns += stmt.groupingExprs_.size();
+        }
+
+        if (stmt.hasOrderByClause()) {
+            queryStats.numOrderByColumns += stmt.orderByElements_.size();
+        }
+
+        if (stmt.hasLimit()) {
+            queryStats.numLimits++;
+        }
+
+        for (TableRef tableRef : stmt.getTableRefs()) {
+            if (tableRef instanceof InlineViewRef) {
+                queryStats.numFromSubqueries++;
+                QueryStats viewQueryStats = getQueryStats(((InlineViewRef) tableRef).getViewStmt());
+                queryStats.merge(viewQueryStats);
+            }
+        }
+
+        if (queryStats.numFromSubqueries > 0 || queryStats.numWhereSubqueries > 0) {
+            queryStats.maxDepthSubqueries++;
+        }
+
+        return queryStats;
+    }
+
+    public static Map<String, Object> analyzeQueryStmt(QueryStmt stmt) {
+        Map<String, Object> analyzedStmt = new HashMap<String, Object>();
+
+        analyzedStmt.put("type", stmt.getClass().getSimpleName());
+
+        QueryStats queryStats = getQueryStats(stmt);
+        analyzedStmt.put("num_output_columns", queryStats.numOutputColumns);
+        analyzedStmt.put("num_from_subqueries", queryStats.numFromSubqueries);
+        analyzedStmt.put("num_where_subqueries", queryStats.numWhereSubqueries);
+        analyzedStmt.put("num_with_subqueries", queryStats.numWithSubqueries);
+        analyzedStmt.put("max_depth_subqueries", queryStats.maxDepthSubqueries);
+        analyzedStmt.put("num_group_by_columns", queryStats.numGroupByColumns);
+        analyzedStmt.put("num_order_by_columns", queryStats.numOrderByColumns);
+        analyzedStmt.put("num_limits", queryStats.numLimits);
+        analyzedStmt.put("num_where_compound_predicates", queryStats.numWhereCompoundPredicates);
+        analyzedStmt.put("num_where_binary_predicates", queryStats.numWhereBinaryPredicates);
+        analyzedStmt.put("num_where_like_predicates", queryStats.numWhereLikePredicates);
+        analyzedStmt.put("num_where_in_predicates", queryStats.numWhereInPredicates);
+        analyzedStmt.put("num_where_between_predicates", queryStats.numWhereBetweenPredicates);
+        analyzedStmt.put("num_where_exists_predicates", queryStats.numWhereExistsPredicates);
+        analyzedStmt.put("num_where_is_null_predicates", queryStats.numWhereIsNullPredicates);
+        analyzedStmt.put("num_where_function_call", queryStats.numWhereFunctionCall);
+        analyzedStmt.put("num_where_case", queryStats.numWhereCase);
+
+        return analyzedStmt;
     }
 
     public static void analyzeQuery(DBCollection queries, DBObject query) throws Exception {
@@ -87,19 +210,17 @@ public class QueryAnalyzer {
         SqlScanner scanner = new SqlScanner(new StringReader(sql));
         SqlParser parser = new SqlParser(scanner);
         Object stmt = parser.parse().value;
-        Map<String, Object> analyzedQuery;
-        if (stmt instanceof SelectStmt) {
-            analyzedQuery = analyzeSelectQuery((SelectStmt) stmt);
+        Map<String, Object> analyzedStmt;
+        if (stmt instanceof QueryStmt) {
+            analyzedStmt = analyzeQueryStmt((QueryStmt) stmt);
         } else if (stmt instanceof InsertStmt) {
-            analyzedQuery = analyzeInsertQuery((InsertStmt) stmt);
-        } else if (stmt instanceof UnionStmt) {
-            analyzedQuery = analyzeUnionQuery((UnionStmt) stmt);
+            analyzedStmt = analyzeInsertStmt((InsertStmt) stmt);
         } else {
-            analyzedQuery = analyzeQuery(stmt);
+            analyzedStmt = analyzeStmt(stmt);
         }
 
-        analyzedQuery.put("stmt", sql);
-        queries.update(query, new BasicDBObject("$set", new BasicDBObject("sql", new BasicDBObject(analyzedQuery))));
+        analyzedStmt.put("stmt", sql);
+        queries.update(query, new BasicDBObject("$set", new BasicDBObject("sql", new BasicDBObject(analyzedStmt))));
     }
 
     public static void main(String[] args) throws Exception {
