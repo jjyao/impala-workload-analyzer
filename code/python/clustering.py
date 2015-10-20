@@ -67,4 +67,4 @@ for i in xrange(0, len(labels)):
     clusters[labels[i]].append(samples[i])
 
 for i in xrange(0, K):
-    print sum(clusters[i]) / len(clusters[i])
+    print sum(clusters[i]) / float(len(clusters[i]))
