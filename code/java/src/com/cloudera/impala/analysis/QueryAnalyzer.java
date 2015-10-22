@@ -92,9 +92,41 @@ public class QueryAnalyzer {
         for (SelectListItem selectListItem : selectList.getItems()) {
             if (selectListItem.isStar()) {
                 queryStats.numOutputColumns = -1;
-                break;
             } else {
-                queryStats.numOutputColumns++;
+                if (queryStats.numOutputColumns != -1) {
+                    queryStats.numOutputColumns++;
+                }
+
+                selectListItem.getExpr().accept(new Visitor<Expr>() {
+                    @Override
+                    public void visit(Expr expr) {
+                        if (expr instanceof CaseExpr) {
+                            queryStats.numSelectCaseExprs++;
+                        } else if (expr instanceof ArithmeticExpr) {
+                            queryStats.numSelectArithmeticExprs++;
+                        } else if (expr instanceof CastExpr) {
+                            queryStats.numSelectCastExprs++;
+                        } else if (expr instanceof FunctionCallExpr) {
+                            queryStats.numSelectFunctionCallExprs++;
+                        } else if (expr instanceof AnalyticExpr) {
+                            queryStats.numSelectAnalyticExprs++;
+                        } else if (expr instanceof CompoundPredicate) {
+                            CompoundPredicate compoundPredicate = (CompoundPredicate) expr;
+                            queryStats.incCounter(queryStats.numSelectCompoundPredicates,
+                                    compoundPredicate.getOp().toString());
+                        } else if (expr instanceof BinaryPredicate) {
+                            BinaryPredicate binaryPredicate = (BinaryPredicate) expr;
+                            queryStats.incCounter(queryStats.numSelectBinaryPredicates,
+                                    binaryPredicate.getOp().getName());
+                        } else if (expr instanceof IsNullPredicate) {
+                            queryStats.numSelectIsNullPredicates++;
+                        } else if (expr instanceof LiteralExpr) {
+                        } else if (expr instanceof SlotRef) {
+                        } else {
+                            System.out.println(expr.getClass().getName());
+                        }
+                    }
+                });
             }
         }
 
@@ -139,13 +171,46 @@ public class QueryAnalyzer {
                     } else if (expr instanceof IsNullPredicate) {
                         queryStats.numWhereIsNullPredicates++;
                     } else if (expr instanceof FunctionCallExpr) {
-                        queryStats.numWhereFunctionCall++;
+                        queryStats.numWhereFunctionCallExprs++;
                     } else if (expr instanceof CaseExpr) {
-                        queryStats.numWhereCase++;
+                        queryStats.numWhereCaseExprs++;
                     } else if (expr instanceof Subquery) {
                         Subquery subquery = (Subquery) expr;
                         queryStats.numWhereSubqueries++;
                         queryStats.merge(getQueryStats(subquery.getStatement()));
+                    } else if (expr instanceof ArithmeticExpr) {
+                        queryStats.numWhereArithmeticExprs++;
+                    } else if (expr instanceof CastExpr) {
+                        queryStats.numWhereCastExprs++;
+                    } else if (expr instanceof TimestampArithmeticExpr) {
+                        queryStats.numWhereTimestampArithmeticExprs++;
+                    } else if (expr instanceof LiteralExpr) {
+                    } else if (expr instanceof SlotRef) {
+                    } else {
+                        System.out.println(expr.getClass().getName());
+                    }
+                }
+            });
+        }
+
+        if (stmt.havingClause_ != null) {
+            stmt.havingClause_.accept(new Visitor<Expr>() {
+                @Override
+                public void visit(Expr expr) {
+                    if (expr instanceof CompoundPredicate) {
+                        CompoundPredicate compoundPredicate = (CompoundPredicate) expr;
+                        queryStats.incCounter(queryStats.numHavingCompoundPredicates,
+                                compoundPredicate.getOp().toString());
+                    } else if (expr instanceof BinaryPredicate) {
+                        BinaryPredicate binaryPredicate = (BinaryPredicate) expr;
+                        queryStats.incCounter(queryStats.numHavingBinaryPredicates,
+                                binaryPredicate.getOp().getName());
+                    } else if (expr instanceof FunctionCallExpr) {
+                        queryStats.numHavingFunctionCallExprs++;
+                    } else if (expr instanceof LiteralExpr) {
+                    } else if (expr instanceof SlotRef) {
+                    } else {
+                        System.out.println(expr.getClass().getName());
                     }
                 }
             });
@@ -168,6 +233,44 @@ public class QueryAnalyzer {
                 queryStats.numFromSubqueries++;
                 QueryStats viewQueryStats = getQueryStats(((InlineViewRef) tableRef).getViewStmt());
                 queryStats.merge(viewQueryStats);
+            }
+
+            if (tableRef.onClause_ != null) {
+                tableRef.onClause_.accept(new Visitor<Expr>() {
+                    @Override
+                    public void visit(Expr expr) {
+                        if (expr instanceof CompoundPredicate) {
+                            CompoundPredicate compoundPredicate = (CompoundPredicate) expr;
+                            queryStats.incCounter(queryStats.numOnCompoundPredicates,
+                                    compoundPredicate.getOp().toString());
+                        } else if (expr instanceof BinaryPredicate) {
+                            BinaryPredicate binaryPredicate = (BinaryPredicate) expr;
+                            queryStats.incCounter(queryStats.numOnBinaryPredicates,
+                                    binaryPredicate.getOp().getName());
+                        } else if (expr instanceof FunctionCallExpr) {
+                            queryStats.numOnFunctionCallExprs++;
+                        } else if (expr instanceof BetweenPredicate) {
+                            BetweenPredicate betweenPredicate = (BetweenPredicate) expr;
+                            queryStats.numOnBetweenPredicates++;
+
+                            try {
+                                betweenPredicate.addChildren(
+                                        (List<Expr>) FieldUtils.readField(
+                                                betweenPredicate, "originalChildren_", true));
+                            } catch (IllegalAccessException e) {
+                                e.printStackTrace();
+                            }
+                        } else if (expr instanceof SlotRef) {
+                        } else if (expr instanceof LiteralExpr) {
+                        } else {
+                            System.out.println(expr.getClass().getName());
+                        }
+                    }
+                });
+            }
+
+            if (tableRef.usingColNames_ != null) {
+                queryStats.numUsingColumns += tableRef.usingColNames_.size();
             }
         }
 
@@ -199,8 +302,27 @@ public class QueryAnalyzer {
         analyzedStmt.put("num_where_between_predicates", queryStats.numWhereBetweenPredicates);
         analyzedStmt.put("num_where_exists_predicates", queryStats.numWhereExistsPredicates);
         analyzedStmt.put("num_where_is_null_predicates", queryStats.numWhereIsNullPredicates);
-        analyzedStmt.put("num_where_function_call", queryStats.numWhereFunctionCall);
-        analyzedStmt.put("num_where_case", queryStats.numWhereCase);
+        analyzedStmt.put("num_where_function_call_exprs", queryStats.numWhereFunctionCallExprs);
+        analyzedStmt.put("num_where_case_exprs", queryStats.numWhereCaseExprs);
+        analyzedStmt.put("num_where_arithmetic_exprs", queryStats.numWhereArithmeticExprs);
+        analyzedStmt.put("num_where_cast_exprs", queryStats.numWhereCastExprs);
+        analyzedStmt.put("num_where_timestamp_arithmetic_exprs", queryStats.numWhereTimestampArithmeticExprs);
+        analyzedStmt.put("num_select_case_exprs", queryStats.numSelectCaseExprs);
+        analyzedStmt.put("num_select_arithmetic_exprs", queryStats.numSelectArithmeticExprs);
+        analyzedStmt.put("num_select_cast_exprs", queryStats.numSelectCastExprs);
+        analyzedStmt.put("num_select_function_call_exprs", queryStats.numSelectFunctionCallExprs);
+        analyzedStmt.put("num_select_analytic_exprs", queryStats.numSelectAnalyticExprs);
+        analyzedStmt.put("num_select_compound_predicates", queryStats.numSelectCompoundPredicates);
+        analyzedStmt.put("num_select_binary_predicates", queryStats.numSelectBinaryPredicates);
+        analyzedStmt.put("num_select_is_null_predicates", queryStats.numSelectIsNullPredicates);
+        analyzedStmt.put("num_having_compound_predicates", queryStats.numHavingCompoundPredicates);
+        analyzedStmt.put("num_having_binary_predicates", queryStats.numHavingBinaryPredicates);
+        analyzedStmt.put("num_having_function_call_exprs", queryStats.numHavingFunctionCallExprs);
+        analyzedStmt.put("num_using_columns", queryStats.numUsingColumns);
+        analyzedStmt.put("num_on_compound_predicates", queryStats.numOnCompoundPredicates);
+        analyzedStmt.put("num_on_binary_predicates", queryStats.numOnBinaryPredicates);
+        analyzedStmt.put("num_on_function_call_exprs", queryStats.numOnFunctionCallExprs);
+        analyzedStmt.put("num_on_between_predicates", queryStats.numOnBetweenPredicates);
 
         return analyzedStmt;
     }

@@ -33,9 +33,28 @@ for query in queries:
             query['sql']['num_where_exists_predicates'] +
             query['sql']['num_where_is_null_predicates'] +
             sum(query['sql']['num_where_binary_predicates'].values()) +
-            sum(query['sql']['num_where_like_predicates'].values()))
-    sample.append(query['sql']['num_where_function_call'])
-    sample.append(query['sql']['num_where_case'])
+            sum(query['sql']['num_where_like_predicates'].values()) +
+            sum(query['sql']['num_having_binary_predicates'].values()) +
+            query['sql']['num_using_columns'] +
+            sum(query['sql']['num_on_binary_predicates'].values()) +
+            query['sql']['num_on_between_predicates'])
+    sample.append(
+            query['sql']['num_where_function_call_exprs'] +
+            query['sql']['num_where_case_exprs'] +
+            query['sql']['num_where_arithmetic_exprs'] +
+            query['sql']['num_where_cast_exprs'] +
+            query['sql']['num_where_timestamp_arithmetic_exprs'] +
+            query['sql']['num_having_function_call_exprs'] +
+            query['sql']['num_on_function_call_exprs'])
+    sample.append(
+            query['sql']['num_select_case_exprs'] +
+            query['sql']['num_select_arithmetic_exprs'] +
+            query['sql']['num_select_cast_exprs'] +
+            query['sql']['num_select_function_call_exprs'] +
+            query['sql']['num_select_analytic_exprs'])
+    sample.append(
+            sum(query['sql']['num_select_binary_predicates'].values()) +
+            query['sql']['num_select_is_null_predicates'])
 
     samples.append(sample)
 
@@ -67,4 +86,4 @@ for i in xrange(0, len(labels)):
     clusters[labels[i]].append(samples[i])
 
 for i in xrange(0, K):
-    print sum(clusters[i]) / float(len(clusters[i]))
+    print numpy.array_str(sum(clusters[i]) / float(len(clusters[i])), precision=0)
