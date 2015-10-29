@@ -2,11 +2,17 @@ import sys
 import numpy
 import plots
 import pymongo
+import argparse
 from matplotlib import pyplot
 
 db = pymongo.MongoClient().impala
-tag = sys.argv[1]
-outputDir = sys.argv[2]
+
+argumentParser = argparse.ArgumentParser()
+argumentParser.add_argument('--summary', action='store_true')
+argumentParser.add_argument('argv', nargs=2)
+args = argumentParser.parse_args()
+tag = args.argv[0]
+outputDir = args.argv[1]
 plots.outputDir = outputDir
 
 queries = db.queries.find({
@@ -31,22 +37,23 @@ timePctPerOperator = {}
 sumTimePerOperator = {}
 
 for query in queries:
-    operators = list(db.operators.find({'query_id': query['_id']}))
-    for operator in operators:
-        operator['diff_time'] = operator['max_time'] - operator['avg_time']
-        operator['diff_time_pct'] = operator['diff_time'] / float(query['runtime'])
-    operators = [operator for operator in operators if operator['diff_time_pct'] >= 0.01]
-    operators.sort(key=lambda operator: operator['diff_time_pct'], reverse=True)
-    pyplot.clf()
-    left = numpy.arange(len(operators))
-    height = [operator['diff_time_pct'] for operator in operators]
-    pyplot.bar(left, height, align = 'center')
-    pyplot.xlabel('Operator')
-    pyplot.ylabel('Diff Time Pct')
-    pyplot.xticks(left, [operator['name'] for operator in operators], rotation='vertical')
-    pyplot.title('Diff Time Pct')
-    pyplot.tight_layout()
-    pyplot.savefig('%s/%s_diff_time_pct.png' % (outputDir, query['_id']))
+    if not args.summary:
+        operators = list(db.operators.find({'query_id': query['_id']}))
+        for operator in operators:
+            operator['diff_time'] = operator['max_time'] - operator['avg_time']
+            operator['diff_time_pct'] = operator['diff_time'] / float(query['runtime'])
+        operators = [operator for operator in operators if operator['diff_time_pct'] >= 0.01]
+        operators.sort(key=lambda operator: operator['diff_time_pct'], reverse=True)
+        pyplot.clf()
+        left = numpy.arange(len(operators))
+        height = [operator['diff_time_pct'] for operator in operators]
+        pyplot.bar(left, height, align = 'center')
+        pyplot.xlabel('Operator')
+        pyplot.ylabel('Diff Time Pct')
+        pyplot.xticks(left, [operator['name'] for operator in operators], rotation='vertical')
+        pyplot.title('Diff Time Pct')
+        pyplot.tight_layout()
+        pyplot.savefig('%s/%s_diff_time_pct.png' % (outputDir, query['_id']))
 
     operators = db.operators.aggregate([
         {'$match': {'query_id': query['_id']}},
@@ -91,11 +98,12 @@ for query in queries:
         'time_pct': hdfsTableSinkTime / sumTimeAllOperators,
     })
 
-    operators.sort(key=lambda operator: operator['sum_time'], reverse=True)
-    plots.stacked_bar([operator['sum_time'] / 1000000 for operator in operators],
-        'Time', ['%s %sms' % (operator['_id'], operator['sum_time'] / 1000000) for operator in operators],
-        'Operator Sum Time (ms)',
-        '%s_stacked_time.png' % query['_id'])
+    if not args.summary:
+        operators.sort(key=lambda operator: operator['sum_time'], reverse=True)
+        plots.stacked_bar([operator['sum_time'] / 1000000 for operator in operators],
+            'Time', ['%s %sms' % (operator['_id'], operator['sum_time'] / 1000000) for operator in operators],
+            'Operator Sum Time (ms)',
+            '%s_stacked_time.png' % query['_id'])
 
     for operator in operators:
         if operator['_id'] not in timePctPerOperator:

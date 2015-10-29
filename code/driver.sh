@@ -12,6 +12,6 @@ java -jar java/out/artifacts/query_analyzer/query_analyzer.jar $1
 mkdir -p $3
 python python/aggs.py $1 $3
 python python/joins.py $1 $3
-python python/stats.py $1 $3
+python python/stats.py --summary $1 $3
 
 python python/clustering.py $1 $3
