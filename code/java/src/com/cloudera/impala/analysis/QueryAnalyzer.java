@@ -324,6 +324,9 @@ public class QueryAnalyzer {
         analyzedStmt.put("num_on_function_call_exprs", queryStats.numOnFunctionCallExprs);
         analyzedStmt.put("num_on_between_predicates", queryStats.numOnBetweenPredicates);
 
+        Parameterizer parameterizer = new Parameterizer();
+        analyzedStmt.put("parameterized_stmt", parameterizer.parameterizeQuery(stmt));
+
         return analyzedStmt;
     }
 
