@@ -14,4 +14,4 @@ python python/aggs.py $1 $3
 python python/joins.py $1 $3
 python python/stats.py $1 $3
 
-python python/clustering.py $1
+python python/clustering.py $1 $3

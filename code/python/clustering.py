@@ -8,9 +8,11 @@ from sklearn import decomposition
 from sklearn import preprocessing
 
 db = pymongo.MongoClient().impala
+tag = sys.argv[1]
+outputDir = sys.argv[2]
 
 queries = db.queries.find({
-    'tag': sys.argv[1],
+    'tag': tag,
     'sql.type': {'$in': ['SelectStmt', 'UnionStmt']}})
 
 samples = []
@@ -63,7 +65,7 @@ samples = numpy.array(samples)
 standardSamples = preprocessing.StandardScaler().fit_transform(samples)
 
 K = range(1, 70)
-estimators = [cluster.KMeans(n_clusters=k).fit(standardSamples) for k in K]
+estimators = [cluster.KMeans(n_clusters=k, max_iter=500, n_init=20).fit(standardSamples) for k in K]
 centers = [estimator.cluster_centers_ for estimator in estimators]
 euclideans = [distance.cdist(standardSamples, center, 'euclidean') for center in centers]
 dist = [numpy.min(euclidean, axis=1) for euclidean in euclideans]
@@ -76,14 +78,15 @@ pyplot.grid(True)
 pyplot.xlabel('Number of clusters')
 pyplot.ylabel('Percentage of variance explained')
 pyplot.title('Elbow for KMeans clustering')
-pyplot.savefig('kmeans.png')
+pyplot.savefig('%s/kmeans.png' % outputDir)
 
 K = 10
-estimator = cluster.KMeans(n_clusters=K).fit(standardSamples)
+estimator = cluster.KMeans(n_clusters=K, max_iter=500, n_init=20).fit(standardSamples)
 labels = estimator.labels_
 clusters = [[] for i in xrange(0, K)]
 for i in xrange(0, len(labels)):
     clusters[labels[i]].append(samples[i])
 
 for i in xrange(0, K):
-    print numpy.array_str(sum(clusters[i]) / float(len(clusters[i])), precision=0)
+    print len(clusters[i])
+    print numpy.array_str(sum(clusters[i]) / float(len(clusters[i])), precision=8)
