@@ -3,7 +3,8 @@ Impala Workload Analyzer
     Parse thrift-formatted profiles and analyze characteristics of workloads
 
 ## USAGE
-    bash driver.sh tag inputFile|inputDir outputDir
+    bash driver.sh tag inputFile|inputDir outputDir >>analysis.log 2>&1
+    Make sure the inputDir only contains profile files
     Run all the code and generate graphs
     Instead of running the driver script, users can run each component individually (see driver.sh)
 
@@ -15,6 +16,8 @@ Impala Workload Analyzer
         |— driver.sh
         |— java
             |— src/com/cloudera/impala/analysis/QueryAnalyzer.java: parse sql
+            |— src/com/cloudera/impala/analysis/QueryStats.java: sql statistics
+            |— src/com/cloudera/impala/analysis/Parameterizer.java: parameterize sql
         |— python
             |— RuntimeProfile.thrift: definition of thrift-formatted profiles
             |— analyze_profiles.py: analyze one profile file
